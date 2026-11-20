@@ -63,7 +63,7 @@ Anyone may broadcast a refund. They can only pay `refundLock`.
 
 ### What a judge does
 
-1. Open the demo. Click Connect and approve WizardConnect. The wallet must hold the asset being sent and, for a one-wallet demo, the asset being received. The page uses mainnet.
+1. Open https://atomcash.vercel.app/. Click Connect and approve WizardConnect. The wallet must hold the asset being sent and, for a one-wallet demo, the asset being received. The page uses mainnet.
 2. Enter the amounts. Pick BCH, or pick a CashToken and paste its category in Send token id or Receive token id.
 3. Click Create transaction. The deposit cashaddr is the send-side contract.
 4. Send to that address from the wallet. The page polls until that outpoint exists.

@@ -2,7 +2,7 @@
 
 Template: https://docs.google.com/presentation/d/1l9lZHeEuW5-V57Ha4488Wa_kLiUlvMMkAVRS8xoqun4/edit?usp=sharing
 github: https://github.com/Utitofon-Udoekong/atomcash
-site: not published
+site: https://atomcash.vercel.app/
 cashtokenaddress: bitcoincash:zq5hh46r4kudjpsayg58gu99h03p00nw4csaumqgy0
 
 Swap BCH for a CashToken, or one CashToken for another, without a custodian. Each side locks its own asset. One preimage pays both sides. A timeout sends each deposit home.
@@ -67,7 +67,7 @@ Category A is `1ec3a4717811372e0f8a3507f52545636fbd9202997d391e27248fe67608df75`
 | A mainnet transaction from the app | Connect, create a swap, the wallet broadcasts it |
 | WizardConnect | The Connect button |
 | An XO template and invitation | `xo/atom-swap.template.json`, `xo/invitation.json`, chipnet refund above |
-| Working demo | `pnpm dev`, then a mainnet wallet |
+| Working demo | https://atomcash.vercel.app/ |
 | Top-of-page banner | Presentation, GitHub, and the EMBER2026 address |
 
 ## Run
