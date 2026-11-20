@@ -1,0 +1,81 @@
+{
+  "invitationIdentifier": "b076b2552c8cbcd57213625958cb6e5e",
+  "templateIdentifier": "b395cdde2a5e0f58cf3d7be5e2bc5004cf418bc347362fffded5981850d9b255",
+  "actionIdentifier": "refund",
+  "createdAtTimestamp": 1795152650952,
+  "commits": [
+    {
+      "commitIdentifier": "d0e61f537c1b717b7ab610c44315d234",
+      "createdAtTimestamp": 1795152650953,
+      "data": {
+        "variables": [
+          {
+            "variableIdentifier": "timeout",
+            "value": "<bigint: 1n>"
+          },
+          {
+            "variableIdentifier": "secretHash",
+            "value": "78382784352cb1f087f08f2aef7f4a2e01d1cad3db9551bd60c8dd0e7db2683a"
+          },
+          {
+            "variableIdentifier": "payoutLock",
+            "value": "76a914adf065aeadf0411c76f372fc83acfc3e0be4959388ac"
+          },
+          {
+            "variableIdentifier": "refundLock",
+            "value": "76a914adf065aeadf0411c76f372fc83acfc3e0be4959388ac"
+          },
+          {
+            "variableIdentifier": "tokenCategory",
+            "value": "0x"
+          },
+          {
+            "variableIdentifier": "tokenAmount",
+            "value": "<bigint: 0n>"
+          },
+          {
+            "variableIdentifier": "fee",
+            "value": "<bigint: 800n>"
+          }
+        ],
+        "inputs": [
+          {
+            "inputIdentifier": "refundInput",
+            "transactionIndex": 0,
+            "outpointTransactionHash": "<uint8array: b2e7968a5b4898085cad96dd358cb974601b357408bdf126967c0d63fe36b030>",
+            "outpointIndex": 0,
+            "sequenceNumber": 0,
+            "unlockingBytecode": "<uint8array: 04bd7b557e4cd402200300001976a914adf065aeadf0411c76f372fc83acfc3e0be4959388ac1976a914adf065aeadf0411c76f372fc83acfc3e0be4959388ac2078382784352cb1f087f08f2aef7f4a2e01d1cad3db9551bd60c8dd0e7db2683a5133577aa87b88c2529dc0009dc3519dc4519d00cd7b8800d1537a8800d3537a9d00d2008800c65379a06900cc00c6547a949c7777047105309b8931b175c2529dc0009dc3519dc4519d00cd537a8800d1537a8800d3537a9d00d2008800c65379a06900cc00c6547a949c777704bd7b557e89748c7a82549d8a>",
+            "valueSatoshis": "<bigint: 5800n>"
+          }
+        ],
+        "outputs": [
+          {
+            "outputIdentifier": "refundOutput",
+            "transactionIndex": 0,
+            "valueSatoshis": "<bigint: 5000n>"
+          }
+        ],
+        "roleIdentifier": "seller",
+        "transactionVersion": 2,
+        "transactionLocktime": 1
+      },
+      "expiresAtTimestamp": 1795170650952,
+      "signature": "ee972cfce9fb4624c9bd920506bd1055987352720af7bbf1ede1d2b8d4ddff3223a6364894d356f598aa1187777b9d7e6088661b6a2c459f59b132dfbe5acbc7",
+      "entityIdentifier": "tpubDFRpuHgUJYdsmY8tCdxBQLwtY8jNmH2GYZVNVGUU1qn4ZTuyyBK1AEX1kzx9KQ45bAb4ZyFSqGb7UH74sgY7C2FGxKBdShunoZPKGAZMpNu"
+    }
+  ],
+  "result": {
+    "transactions": {
+      "refundTransaction": {
+        "transactionHash": "d48630e8cd953841810d0d14029485811154f7362c7f41736f8e089759a1f16a",
+        "createdAtTimestamp": 1795152651046,
+        "createdByEntityIdentifier": "tpubDFRpuHgUJYdsmY8tCdxBQLwtY8jNmH2GYZVNVGUU1qn4ZTuyyBK1AEX1kzx9KQ45bAb4ZyFSqGb7UH74sgY7C2FGxKBdShunoZPKGAZMpNu",
+        "createdBySignature": "de2359154bf58e2accba33c25d2a3c30ad634d1459a879f0c27cfd6286a45a9c598205c28878adac954ab59df84a020591e39964f1036d70f646150a40dba218",
+        "broadcastedAtTimestamp": 1795152653232,
+        "broadcastedByEntityIdentifier": "tpubDFRpuHgUJYdsmY8tCdxBQLwtY8jNmH2GYZVNVGUU1qn4ZTuyyBK1AEX1kzx9KQ45bAb4ZyFSqGb7UH74sgY7C2FGxKBdShunoZPKGAZMpNu",
+        "broadcastedBySignature": "b85e0e16f2bcbcb1532d4417ee2b020c442d8a23c27e0733829017fbd4648d26bad599dbaea67a5ab13edccdd472905e776a90923d308696743fdf5310eaddd4"
+      }
+    }
+  }
+}

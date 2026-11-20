@@ -1,0 +1,7 @@
+{
+  "timeout": "1",
+  "secretHash": "78382784352cb1f087f08f2aef7f4a2e01d1cad3db9551bd60c8dd0e7db2683a",
+  "payoutLock": "76a914adf065aeadf0411c76f372fc83acfc3e0be4959388ac",
+  "refundLock": "76a914adf065aeadf0411c76f372fc83acfc3e0be4959388ac",
+  "fundTxid": "b2e7968a5b4898085cad96dd358cb974601b357408bdf126967c0d63fe36b030"
+}

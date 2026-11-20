@@ -1,0 +1,139 @@
+{
+  "$schema": "https://libauth.org/schemas/wallet-template-v0.schema.json",
+  "name": "AtomCash",
+  "description": "One side of a same-chain BCH or CashToken swap. The redeem script is the SolidCash AtomSwap bytecode with its constructor values pushed in front.",
+  "version": "1",
+  "supported": ["BCH_2025_05", "BCH_2026_05"],
+  "defaults": {
+    "address": {
+      "lockingScript": "offer",
+      "role": "seller"
+    }
+  },
+  "roles": {
+    "seller": {
+      "name": "Seller",
+      "description": "Locks this side and can refund it after the timeout."
+    },
+    "buyer": {
+      "name": "Buyer",
+      "description": "Claims this side with the preimage."
+    }
+  },
+  "start": [
+    {
+      "action": "refund",
+      "role": "seller"
+    }
+  ],
+  "variables": {
+    "timeout": { "name": "Timeout", "description": "Absolute locktime for refund.", "type": "bigint" },
+    "secretHash": { "name": "Secret hash", "description": "SHA256 of the preimage.", "type": "bytes" },
+    "payoutLock": { "name": "Payout", "description": "Locking bytecode paid on claim.", "type": "bytes" },
+    "refundLock": { "name": "Refund", "description": "Locking bytecode paid after timeout.", "type": "bytes" },
+    "tokenCategory": { "name": "Category", "description": "CashToken category in consensus byte order. Empty for BCH.", "type": "bytes" },
+    "tokenAmount": { "name": "Token amount", "description": "Fungible amount the output must pay. Zero for BCH.", "type": "bigint" },
+    "fee": { "name": "Fee", "description": "Satoshis the claim or refund output leaves behind.", "type": "bigint" },
+    "secret": { "name": "Preimage", "description": "32-byte preimage. Present only on the claim unlock.", "type": "bytes" }
+  },
+  "scripts": {
+    "redeem": "<fee> <tokenAmount> <tokenCategory> <refundLock> <payoutLock> <secretHash> <timeout> <0x577aa87b88c2529dc0009dc3519dc4519d00cd7b8800d1537a8800d3537a9d00d2008800c65379a06900cc00c6547a949c7777> <0x7105309b> OP_DEFINE <0xb175c2529dc0009dc3519dc4519d00cd537a8800d1537a8800d3537a9d00d2008800c65379a06900cc00c6547a949c7777> <0xbd7b557e> OP_DEFINE OP_DEPTH OP_1SUB OP_ROLL OP_SIZE OP_4 OP_NUMEQUALVERIFY OP_INVOKE",
+    "claimUnlock": "<0x7105309b> <secret>",
+    "refundUnlock": "<0xbd7b557e>"
+  },
+  "lockingScripts": {
+    "offer": {
+      "name": "Swap offer",
+      "description": "P2SH32 of the AtomSwap redeem script.",
+      "lockingType": "p2sh",
+      "lockingBytecode": "redeem",
+      "unlockingBytecode": "refundUnlock",
+      "state": {
+        "variables": ["timeout", "secretHash", "payoutLock", "refundLock", "tokenCategory", "tokenAmount", "fee"]
+      },
+      "roles": {
+        "seller": {
+          "name": "Seller",
+          "description": "Holds the refund path.",
+          "state": {
+            "variables": ["timeout", "secretHash", "payoutLock", "refundLock", "tokenCategory", "tokenAmount", "fee"]
+          }
+        }
+      }
+    }
+  },
+  "transactions": {
+    "claimTransaction": {
+      "name": "Claimed swap",
+      "description": "The preimage paid the committed output.",
+      "version": 2,
+      "inputs": [{ "input": "claimInput", "inputIndex": 0 }],
+      "outputs": [{ "output": "payoutOutput", "outputIndex": 0 }]
+    },
+    "refundTransaction": {
+      "name": "Refunded swap",
+      "description": "The timeout paid the committed refund.",
+      "version": 2,
+      "locktime": "$(<timeout>)",
+      "inputs": [{ "input": "refundInput", "inputIndex": 0 }],
+      "outputs": [{ "output": "refundOutput", "outputIndex": 0 }]
+    }
+  },
+  "inputs": {
+    "claimInput": {
+      "name": "Offer",
+      "description": "The locked swap output.",
+      "unlockingScript": "claimUnlock"
+    },
+    "refundInput": {
+      "name": "Offer",
+      "description": "The locked swap output.",
+      "unlockingScript": "refundUnlock"
+    }
+  },
+  "outputs": {
+    "payoutOutput": {
+      "name": "Payout",
+      "description": "The asset the claim pays.",
+      "lockingScript": "$(<payoutLock>)"
+    },
+    "refundOutput": {
+      "name": "Refund",
+      "description": "The asset the timeout returns.",
+      "lockingScript": "$(<refundLock>)"
+    }
+  },
+  "actions": {
+    "claim": {
+      "name": "Claim",
+      "description": "Pay the committed address with the preimage.",
+      "roles": {
+        "buyer": {
+          "name": "Buyer",
+          "description": "Reveals the preimage.",
+          "requirements": { "variables": ["secret"] }
+        }
+      },
+      "requirements": {
+        "variables": ["timeout", "secretHash", "payoutLock", "refundLock", "tokenCategory", "tokenAmount", "fee"],
+        "participants": [{ "role": "buyer", "slots": { "min": 1, "max": 1 } }]
+      },
+      "transaction": "claimTransaction"
+    },
+    "refund": {
+      "name": "Refund",
+      "description": "Pay the committed refund address after the timeout.",
+      "roles": {
+        "seller": {
+          "name": "Seller",
+          "description": "Takes the timeout path."
+        }
+      },
+      "requirements": {
+        "variables": ["timeout", "secretHash", "payoutLock", "refundLock", "tokenCategory", "tokenAmount", "fee"],
+        "participants": [{ "role": "seller", "slots": { "min": 1, "max": 1 } }]
+      },
+      "transaction": "refundTransaction"
+    }
+  }
+}
