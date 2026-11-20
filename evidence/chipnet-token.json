@@ -1,0 +1,16 @@
+{
+  "categoryA": "1ec3a4717811372e0f8a3507f52545636fbd9202997d391e27248fe67608df75",
+  "categoryB": "cd536c0ad219d7919d43a0cc8bb4565418ffeb6990bb04a9bf0bbe8d7206b73f",
+  "supply": "1000",
+  "amount": "100",
+  "aliceContract": "bchtest:rw2gev502z459atwpxvakrpmnngvwuw6cx2kg8l8yegp4xectvfpwzvg8w3zf",
+  "bobContract": "bchtest:r0txcem9yzy6vrkehw4lkds2zfttnj8s3w9zw9xhev55zsxgf8kj565lz4v6s",
+  "aliceFundTxid": "42510d2f42468a79ddfc81ad4abf3b2db35733b433c4d51be431933b44595f5c",
+  "bobFundTxid": "8cbe13cb59374eae040793f5eefeea6fa8b81a205bb97374bfd7d33dabde3bb2",
+  "bobClaimTxid": "c6d1854a9c32b6a25ba12201101908d9ef2b24075e11a81cb518a186efe00b3f",
+  "aliceClaimTxid": "d3a6f0738add3dafbfbbcec8c0d236ad4214cde67c7c4a632e7ac1d38b186c74",
+  "rejected": [
+    "category",
+    "amount"
+  ]
+}
