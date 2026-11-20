@@ -842,7 +842,7 @@ export function Swap() {
   return (
     <main className="desk">
       <div className="banner">
-        <a href="https://docs.google.com/presentation/d/1iTtsAQ2jIcaD33batxS8zI88G1gCnkFvmSRe_3gxW4U/edit?usp=sharing">Presentation</a>
+        <a href="https://docs.google.com/presentation/d/1l9lZHeEuW5-V57Ha4488Wa_kLiUlvMMkAVRS8xoqun4/edit?usp=sharing">Presentation</a>
         <a href="https://github.com/Utitofon-Udoekong/atomcash">Repository</a>
         <span>
           EMBER2026 <span className="banner-addr">bitcoincash:zq5hh46r4kudjpsayg58gu99h03p00nw4csaumqgy0</span>
