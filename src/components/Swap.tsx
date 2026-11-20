@@ -842,14 +842,17 @@ export function Swap() {
   return (
     <main className="desk">
       <div className="banner">
-        <a href="/AtomCash-BLAZE-2026.pptx">Presentation</a>
+        <a href="https://docs.google.com/presentation/d/1iTtsAQ2jIcaD33batxS8zI88G1gCnkFvmSRe_3gxW4U/edit?usp=sharing">Presentation</a>
         <a href="https://github.com/Utitofon-Udoekong/atomcash">Repository</a>
         <span>
           EMBER2026 <span className="banner-addr">bitcoincash:zq5hh46r4kudjpsayg58gu99h03p00nw4csaumqgy0</span>
         </span>
       </div>
       <header className="nav">
-        <span className="mark">AtomCash</span>
+        <span className="mark">
+          <img src="/logo.png" alt="" width={22} height={22} />
+          AtomCash
+        </span>
         <div className="nav-actions">
           <button className="connect" type="button" onClick={() => setShowConnect(true)}>
             {wallet ? "Connected" : "Connect"}
