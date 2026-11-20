@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
+  <rect width="1600" height="900" fill="#0c1210"/>
+  <rect x="80" y="80" width="1440" height="740" rx="28" fill="#141c19" stroke="#2c3b36"/>
+  <text x="140" y="220" fill="#8ea399" font-family="Arial, sans-serif" font-size="28" letter-spacing="8">BCH BLAZE 2026</text>
+  <text x="140" y="360" fill="#e7f2ec" font-family="Arial, sans-serif" font-size="92" letter-spacing="10">ATOMCASH</text>
+  <text x="140" y="450" fill="#e08a3c" font-family="Arial, sans-serif" font-size="36">Same-chain atomic swap for BCH and CashTokens</text>
+  <text x="140" y="700" fill="#8ea399" font-family="Arial, sans-serif" font-size="24">Widget Factory title card. Paste into the official deck.</text>
+</svg>
