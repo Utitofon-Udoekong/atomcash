@@ -1,0 +1,55 @@
+{
+  "name": "atomcash",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "predev": "solidhat compile",
+    "prebuild": "solidhat compile",
+    "build": "next build",
+    "start": "next start",
+    "compile": "solidhat compile",
+    "test": "solidhat compile && vitest run --config vitest.solidhat.config.ts",
+    "evidence": "tsx scripts/evidence.ts"
+  },
+  "dependencies": {
+    "@bitauth/libauth": "3.1.0-next.8",
+    "@noble/curves": "1.2.0",
+    "@solidcash/solidcash": "0.51.1",
+    "@wizardconnect/core": "^0.2.5",
+    "@wizardconnect/dapp": "0.2.8",
+    "@xo-cash/engine": "0.1.1-next.18170561234",
+    "@xo-cash/utils": "0.0.10",
+    "next": "^15.5.4",
+    "qrcode": "^1.5.4",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "better-sqlite3",
+      "sqlite3"
+    ],
+    "patchedDependencies": {
+      "@noble/curves@2.0.1": "patches/@noble__curves@2.0.1.patch"
+    },
+    "packageExtensions": {
+      "@solidcash/solidcash": {
+        "dependencies": {
+          "@noble/curves": "1.2.0"
+        }
+      }
+    }
+  },
+  "devDependencies": {
+    "@solidcash/solidhat": "0.51.1",
+    "@types/node": "^24.5.2",
+    "@types/qrcode": "^1.5.5",
+    "@types/react": "^19.1.13",
+    "@types/react-dom": "^19.1.9",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}

@@ -1,0 +1,9 @@
+node_modules
+.next
+cache
+typechain-types
+.secrets
+.xo
+.env
+.env.local
+*.tsbuildinfo

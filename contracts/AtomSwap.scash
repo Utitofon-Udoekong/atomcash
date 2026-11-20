@@ -1,0 +1,41 @@
+pragma solidcash ^0.51.0;
+
+// One side of a same-chain HTLC. The other side is a second instance with the
+// same secretHash, the payout locks swapped, and an earlier timeout.
+contract AtomSwap(
+    bigint timeout,
+    bytes32 secretHash,
+    bytes payoutLock,
+    bytes refundLock,
+    bytes tokenCategory,
+    bigint tokenAmount,
+    bigint fee
+) {
+    function claim(bytes secret) {
+        require(sha256(secret) == secretHash, "secret");
+        require(tx.version == 2, "version");
+        require(this.activeInputIndex == 0, "input");
+        require(tx.inputs.length == 1, "inputs");
+        require(tx.outputs.length == 1, "outputs");
+        require(tx.outputs[0].lockingBytecode == payoutLock, "lock");
+        require(tx.outputs[0].tokenCategory == tokenCategory, "category");
+        require(tx.outputs[0].tokenAmount == tokenAmount, "amount");
+        require(tx.outputs[0].nftCommitment == 0x, "commitment");
+        require(tx.inputs[0].value > fee, "fee");
+        require(tx.outputs[0].value == tx.inputs[0].value - fee, "value");
+    }
+
+    function refund() {
+        require(tx.time >= timeout, "timeout");
+        require(tx.version == 2, "version");
+        require(this.activeInputIndex == 0, "input");
+        require(tx.inputs.length == 1, "inputs");
+        require(tx.outputs.length == 1, "outputs");
+        require(tx.outputs[0].lockingBytecode == refundLock, "lock");
+        require(tx.outputs[0].tokenCategory == tokenCategory, "category");
+        require(tx.outputs[0].tokenAmount == tokenAmount, "amount");
+        require(tx.outputs[0].nftCommitment == 0x, "commitment");
+        require(tx.inputs[0].value > fee, "fee");
+        require(tx.outputs[0].value == tx.inputs[0].value - fee, "value");
+    }
+}
