@@ -12,6 +12,12 @@ import { MockNetworkProvider } from "@solidcash/solidcash/network/mock";
 import artifactJson from "../../artifacts/solidcash/AtomSwap.json";
 
 export const FEE = 800n;
+export const OWNER_FEE = 1_000n;
+/** P2PKH lock for bitcoincash:zq5hh46r4kudjpsayg58gu99h03p00nw4csaumqgy0. */
+export const OWNER_LOCK = Uint8Array.from([
+  0x76, 0xa9, 0x14, 0x29, 0x7b, 0xd7, 0x43, 0xad, 0xb8, 0xd9, 0x06, 0x1d, 0x22, 0x28, 0x74, 0x70, 0xa5, 0xbb, 0xe2,
+  0x17, 0xbe, 0x6e, 0xae, 0x88, 0xac,
+]);
 /** Token outputs on the 2026 dust schedule need at least 651 sats. */
 export const DUST = 800n;
 export const artifact = artifactJson as unknown as Artifact;
@@ -127,9 +133,10 @@ export function claimTx(
     .addInput(utxo, contract.unlock.claim(secret))
     .addOutput({
       to: payoutLock,
-      amount: utxo.satoshis - FEE,
+      amount: utxo.satoshis - FEE - OWNER_FEE,
       token: token === undefined ? undefined : { amount: token.amount, category: token.category },
-    });
+    })
+    .addOutput({ to: OWNER_LOCK, amount: OWNER_FEE });
 }
 
 export function refundTx(
@@ -144,9 +151,10 @@ export function refundTx(
     .addInput(utxo, contract.unlock.refund())
     .addOutput({
       to: refundLock,
-      amount: utxo.satoshis - FEE,
+      amount: utxo.satoshis - FEE - OWNER_FEE,
       token: token === undefined ? undefined : { amount: token.amount, category: token.category },
     })
+    .addOutput({ to: OWNER_LOCK, amount: OWNER_FEE })
     .setLocktime(locktime);
 }
 

@@ -71,7 +71,7 @@ interface AddressBody {
 type Body = LockBody | PrepareBody | UtxoBody | FundBody | SpendBody | BroadcastBody | AddressBody;
 
 function isNet(value: string): value is NetName {
-  return value === "chipnet" || value === "mainnet";
+  return value === "mainnet";
 }
 
 export async function POST(request: Request): Promise<NextResponse> {

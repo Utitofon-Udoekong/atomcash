@@ -4,6 +4,8 @@ import "@solidcash/solidcash/vitest";
 import {
   DUST,
   FEE,
+  OWNER_FEE,
+  OWNER_LOCK,
   claimTx,
   consensusCategory,
   flipByte,
@@ -55,7 +57,7 @@ describe("AtomSwap", () => {
       tokenAmount: TOKEN_AMOUNT,
     });
     const contract = instantiate(provider, params);
-    const utxo = await fund(provider, contract, DUST + FEE, {
+    const utxo = await fund(provider, contract, DUST + FEE + OWNER_FEE, {
       category: TOKEN,
       amount: TOKEN_AMOUNT,
     });
@@ -72,6 +74,9 @@ describe("AtomSwap", () => {
     expect(paid[0]?.token?.amount).toBe(TOKEN_AMOUNT);
     expect(paid[0]?.token?.category).toBe(TOKEN);
     expect(paid[0]?.satoshis).toBe(DUST);
+    const owner = await provider.getUtxosForLockingBytecode(OWNER_LOCK);
+    expect(owner[0]?.satoshis).toBe(OWNER_FEE);
+    expect(owner[0]?.token).toBeUndefined();
     mkdirSync("evidence", { recursive: true });
     mkdirSync("evidence", { recursive: true });
     writeFileSync(
@@ -90,7 +95,7 @@ describe("AtomSwap", () => {
       refundLock: refund,
     });
     const contract = instantiate(provider, params);
-    const utxo = await fund(provider, contract, BCH_PAYOUT + FEE);
+    const utxo = await fund(provider, contract, BCH_PAYOUT + FEE + OWNER_FEE);
     const early = refundTx(provider, contract, utxo, refund, 0);
     expect(early).toFailRequireWith("timeout");
     const ready = refundTx(provider, contract, utxo, refund, 1);
@@ -120,7 +125,7 @@ describe("AtomSwap", () => {
       tokenAmount: TOKEN_AMOUNT,
     });
     const contract = instantiate(provider, params);
-    const utxo = await fund(provider, contract, DUST + FEE, {
+    const utxo = await fund(provider, contract, DUST + FEE + OWNER_FEE, {
       category: TOKEN,
       amount: TOKEN_AMOUNT,
     });
@@ -163,7 +168,7 @@ describe("AtomSwap", () => {
       tokenAmount: TOKEN_AMOUNT,
     });
     const contract = instantiate(provider, params);
-    const utxo = await fund(provider, contract, DUST + FEE, {
+    const utxo = await fund(provider, contract, DUST + FEE + OWNER_FEE, {
       category: TOKEN,
       amount: TOKEN_AMOUNT,
     });
@@ -210,11 +215,11 @@ describe("AtomSwap", () => {
         refundLock: bobRefund,
       }),
     );
-    const aliceUtxo = await fund(provider, alice, DUST + FEE, {
+    const aliceUtxo = await fund(provider, alice, DUST + FEE + OWNER_FEE, {
       category: TOKEN,
       amount: TOKEN_AMOUNT,
     });
-    const bobUtxo = await fund(provider, bob, BCH_PAYOUT + FEE);
+    const bobUtxo = await fund(provider, bob, BCH_PAYOUT + FEE + OWNER_FEE);
     const aliceClaimsBob = await claimTx(
       provider,
       bob,

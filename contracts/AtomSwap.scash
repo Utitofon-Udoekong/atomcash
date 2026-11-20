@@ -2,6 +2,8 @@ pragma solidcash ^0.51.0;
 
 // One side of a same-chain HTLC. The other side is a second instance with the
 // same secretHash, the payout locks swapped, and an earlier timeout.
+// Output 0 pays the counterparty or the refund. Output 1 pays the owner 1000 sats.
+// The 800-sat `fee` is what remains for the miner.
 contract AtomSwap(
     bigint timeout,
     bytes32 secretHash,
@@ -16,13 +18,18 @@ contract AtomSwap(
         require(tx.version == 2, "version");
         require(this.activeInputIndex == 0, "input");
         require(tx.inputs.length == 1, "inputs");
-        require(tx.outputs.length == 1, "outputs");
+        require(tx.outputs.length == 2, "outputs");
         require(tx.outputs[0].lockingBytecode == payoutLock, "lock");
         require(tx.outputs[0].tokenCategory == tokenCategory, "category");
         require(tx.outputs[0].tokenAmount == tokenAmount, "amount");
         require(tx.outputs[0].nftCommitment == 0x, "commitment");
-        require(tx.inputs[0].value > fee, "fee");
-        require(tx.outputs[0].value == tx.inputs[0].value - fee, "value");
+        require(tx.outputs[1].lockingBytecode == 0x76a914297bd743adb8d9061d22287470a5bbe217be6eae88ac, "feeLock");
+        require(tx.outputs[1].tokenCategory == 0x, "feeCategory");
+        require(tx.outputs[1].tokenAmount == 0, "feeAmount");
+        require(tx.outputs[1].nftCommitment == 0x, "feeCommitment");
+        require(tx.outputs[1].value == 1000, "owner");
+        require(tx.inputs[0].value > fee + 1000, "fee");
+        require(tx.outputs[0].value == tx.inputs[0].value - fee - 1000, "value");
     }
 
     function refund() {
@@ -30,12 +37,17 @@ contract AtomSwap(
         require(tx.version == 2, "version");
         require(this.activeInputIndex == 0, "input");
         require(tx.inputs.length == 1, "inputs");
-        require(tx.outputs.length == 1, "outputs");
+        require(tx.outputs.length == 2, "outputs");
         require(tx.outputs[0].lockingBytecode == refundLock, "lock");
         require(tx.outputs[0].tokenCategory == tokenCategory, "category");
         require(tx.outputs[0].tokenAmount == tokenAmount, "amount");
         require(tx.outputs[0].nftCommitment == 0x, "commitment");
-        require(tx.inputs[0].value > fee, "fee");
-        require(tx.outputs[0].value == tx.inputs[0].value - fee, "value");
+        require(tx.outputs[1].lockingBytecode == 0x76a914297bd743adb8d9061d22287470a5bbe217be6eae88ac, "feeLock");
+        require(tx.outputs[1].tokenCategory == 0x, "feeCategory");
+        require(tx.outputs[1].tokenAmount == 0, "feeAmount");
+        require(tx.outputs[1].nftCommitment == 0x, "feeCommitment");
+        require(tx.outputs[1].value == 1000, "owner");
+        require(tx.inputs[0].value > fee + 1000, "fee");
+        require(tx.outputs[0].value == tx.inputs[0].value - fee - 1000, "value");
     }
 }

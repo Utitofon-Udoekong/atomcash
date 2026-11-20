@@ -12,6 +12,7 @@ import { placeholderP2PKHUnlocker } from "@solidcash/solidcash/walletconnect";
 import {
   DUST,
   FEE,
+  OWNER_FEE,
   claimTx,
   consensusCategory,
   instantiate,
@@ -185,7 +186,7 @@ export async function buildFunding(args: {
     });
     const contract = instantiate(provider, side);
     const sellingToken = side.tokenCategory.length > 0;
-    const lockedSats = (sellingToken ? DUST : BigInt(args.payoutSats)) + FEE;
+    const lockedSats = (sellingToken ? DUST : BigInt(args.payoutSats)) + FEE + OWNER_FEE;
     const selected: Coin[] = [];
     let sats = 0n;
     let token = 0n;

@@ -3,9 +3,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import QRCode from "qrcode";
 import { DappConnectionManager } from "@wizardconnect/dapp";
-import { initiateDappRelay } from "@wizardconnect/core";
+import { initiateDappRelay, type DappRelayResult } from "@wizardconnect/core";
 
-type NetName = "chipnet" | "mainnet";
+type NetName = "mainnet";
 type AssetKind = "bch" | "token";
 type Mode = "float" | "fixed";
 
@@ -100,7 +100,11 @@ interface WireSource {
 
 const ALICE_WINDOW = 180;
 const BOB_WINDOW = 120;
-const FEE_SATS = 800;
+const MINER_FEE_SATS = 800;
+const OWNER_FEE_SATS = 1_000;
+const FEE_SATS = MINER_FEE_SATS + OWNER_FEE_SATS;
+const BCH_RESERVE = 3_000n;
+const PORTIONS = [25, 50, 75, 100] as const;
 
 function hexToBytes(hex: string): Uint8Array {
   const out = new Uint8Array(hex.length / 2);
@@ -129,6 +133,20 @@ function bchOf(sats: bigint): string {
   const whole = sats / 100_000_000n;
   const frac = (sats % 100_000_000n).toString().padStart(8, "0").replace(/0+$/, "");
   return frac === "" ? whole.toString() : `${whole}.${frac}`;
+}
+
+function fromBase(amount: bigint, decimals: number): string {
+  if (decimals <= 0) return amount.toString();
+  const scale = 10n ** BigInt(decimals);
+  const whole = amount / scale;
+  const frac = (amount % scale).toString().padStart(decimals, "0").replace(/0+$/, "");
+  return frac === "" ? whole.toString() : `${whole}.${frac}`;
+}
+
+function categoryKey(coin: Coin): string | undefined {
+  const raw = coin.tokenCategory?.replace(/^0x/, "").toLowerCase();
+  if (raw === undefined || raw === "") return undefined;
+  return raw;
 }
 
 function toBase(text: string, decimals: number): string {
@@ -229,6 +247,19 @@ function statusLine(phase: Phase): string {
   }
 }
 
+let pairing: { manager: DappConnectionManager; relay: DappRelayResult } | null = null;
+
+function openPairing(): { manager: DappConnectionManager; relay: DappRelayResult } {
+  if (pairing !== null) return pairing;
+  const manager = new DappConnectionManager("AtomCash", undefined, { session: false });
+  const relay = initiateDappRelay((payload) => {
+    manager.updateConnection(payload.client, payload.status);
+  });
+  manager.attachRelay(relay);
+  pairing = { manager, relay };
+  return pairing;
+}
+
 function qrTarget(phase: Phase, showConnect: boolean, uri: string | null): string | null {
   if (showConnect) return uri;
   switch (phase.name) {
@@ -259,7 +290,7 @@ function pairRate(send: Asset, receive: Asset, sendText: string, receiveText: st
 }
 
 export function Swap() {
-  const [network, setNetwork] = useState<NetName>("chipnet");
+  const network: NetName = "mainnet";
   const [sendText, setSendText] = useState("0");
   const [receiveText, setReceiveText] = useState("0");
   const [sendAsset, setSendAsset] = useState<Asset>({ kind: "bch", category: "", symbol: "BCH", decimals: 8 });
@@ -277,6 +308,10 @@ export function Swap() {
   const [copied, setCopied] = useState(false);
   const [manager, setManager] = useState<DappConnectionManager | null>(null);
   const [uri, setUri] = useState<string | null>(null);
+  const [qrUri, setQrUri] = useState<string | null>(null);
+  const [account, setAccount] = useState<string | null>(null);
+  const [coins, setCoins] = useState<Coin[]>([]);
+  const [portion, setPortion] = useState<number | null>(null);
   const [qr, setQr] = useState<string | null>(null);
   const [wallet, setWallet] = useState(false);
   const [showConnect, setShowConnect] = useState(false);
@@ -317,21 +352,52 @@ export function Swap() {
     setReceiveText(quotedReceive(sendAsset, receiveAsset, sendText, bchUsd));
   }, [mode, bchUsd, sendAsset, receiveAsset, sendText]);
 
-  useEffect(() => {
-    const next = new DappConnectionManager("AtomCash", undefined, { session: false });
-    const relay = initiateDappRelay((payload) => {
-      next.updateConnection(payload.client, payload.status);
+  async function accountOf(current: DappConnectionManager): Promise<void> {
+    const pub = current.getPubkey(0, 0n);
+    if (pub === undefined) return;
+    const lock = await post<{ address: string }>({
+      op: "lock",
+      network,
+      pubkeyHex: bytesToHex(pub),
+      token: true,
     });
-    next.attachRelay(relay);
-    next.on("walletready", () => setWallet(true));
-    setManager(next);
-    setUri(relay.uri);
+    setAccount(lock.address);
+  }
+
+  useEffect(() => {
+    const session = openPairing();
+    const onReady = () => {
+      setWallet(true);
+      setShowConnect(false);
+      void accountOf(session.manager).catch(() => undefined);
+    };
+    const onDisconnect = () => {
+      setWallet(false);
+      setAccount(null);
+      setCoins([]);
+      setPortion(null);
+    };
+    session.manager.on("walletready", onReady);
+    session.manager.on("disconnect", onDisconnect);
+    setManager(session.manager);
+    setUri(session.relay.uri);
+    setQrUri(session.relay.qrUri);
+    if (session.manager.isWalletDiscovered()) {
+      setWallet(true);
+      void accountOf(session.manager).catch(() => undefined);
+    }
     return () => {
-      relay.cleanup();
+      session.manager.off("walletready", onReady);
+      session.manager.off("disconnect", onDisconnect);
     };
   }, []);
 
-  const scan = qrTarget(phase, showConnect, uri);
+  useEffect(() => {
+    if (!wallet || manager === null) return;
+    void accountOf(manager).catch(() => undefined);
+  }, [wallet, manager]);
+
+  const scan = qrTarget(phase, showConnect, qrUri);
 
   useEffect(() => {
     if (scan === null) {
@@ -395,17 +461,81 @@ export function Swap() {
     });
   }, [quoted]);
 
-  function onSend(value: string) {
+  function writeSend(value: string, nextPortion: number | null) {
+    setPortion(nextPortion);
     setSendText(value);
     if (mode === "float") setReceiveText(quotedReceive(sendAsset, receiveAsset, value, bchUsd));
   }
 
+  function onSend(value: string) {
+    writeSend(value, null);
+  }
+
+  function chooseSend(asset: Asset) {
+    setPortion(null);
+    setSendAsset(asset);
+  }
+
   function flipAssets() {
+    setPortion(null);
     setSendAsset(receiveAsset);
     setReceiveAsset(sendAsset);
     setSendText(receiveText);
     setReceiveText(sendText);
   }
+
+  useEffect(() => {
+    const watching = phase.name === "idle" || phase.name === "quote";
+    if (!wallet || manager === null || !watching) return;
+    let cancel = false;
+    async function load() {
+      if (manager === null) return;
+      const receive = manager.getPubkey(0, 0n);
+      const change = manager.getPubkey(1, 0n);
+      if (receive === undefined || change === undefined) return;
+      const specs = [
+        { pub: receive, token: false, pathName: "receive", pathIndex: 0 },
+        { pub: receive, token: true, pathName: "receive", pathIndex: 0 },
+        { pub: change, token: false, pathName: "change", pathIndex: 0 },
+        { pub: change, token: true, pathName: "change", pathIndex: 0 },
+      ];
+      const locks = await Promise.all(
+        specs.map((row) =>
+          post<{ address: string }>({
+            op: "lock",
+            network,
+            pubkeyHex: bytesToHex(row.pub),
+            token: row.token,
+          }),
+        ),
+      );
+      const seenAddress = new Set<string>();
+      const targets: { address: string; pathName: string; pathIndex: number }[] = [];
+      specs.forEach((row, index) => {
+        const address = locks[index]?.address;
+        if (address === undefined || seenAddress.has(address)) return;
+        seenAddress.add(address);
+        targets.push({ address, pathName: row.pathName, pathIndex: row.pathIndex });
+      });
+      const listed = await coinsOf(targets);
+      const seenCoin = new Set<string>();
+      const unique = listed.filter((coin) => {
+        const key = `${coin.txid}:${coin.vout}`;
+        if (seenCoin.has(key)) return false;
+        seenCoin.add(key);
+        return true;
+      });
+      if (!cancel) setCoins(unique);
+    }
+    void load().catch(() => undefined);
+    const timer = setInterval(() => {
+      void load().catch(() => undefined);
+    }, 12000);
+    return () => {
+      cancel = true;
+      clearInterval(timer);
+    };
+  }, [wallet, manager, network, phase.name]);
 
   async function locks() {
     if (manager === null || !wallet) throw new Error("wallet");
@@ -643,7 +773,6 @@ export function Swap() {
 
   const form = phase.name === "idle" || phase.name === "quote";
   const proof = headline(phase);
-  const locked = !form;
   const oracleText =
     bchUsd > 0 && receiveAsset.kind === "token" && receiveAsset.usd !== undefined
       ? `1 BCH = ${(bchUsd / receiveAsset.usd).toFixed(4)} ${receiveAsset.symbol}`
@@ -653,6 +782,55 @@ export function Swap() {
           ? `1 BCH = $${bchUsd.toFixed(2)}`
           : "";
   const rateText = mode === "fixed" ? (pairRate(sendAsset, receiveAsset, sendText, receiveText) ?? "") : oracleText;
+  const bchHeld = coins.reduce((sum, coin) => (categoryKey(coin) === undefined ? sum + BigInt(coin.satoshis) : sum), 0n);
+  const tokenHeld = new Map<string, { total: bigint; largest: bigint }>();
+  for (const coin of coins) {
+    const key = categoryKey(coin);
+    if (key === undefined) continue;
+    const amount = BigInt(coin.tokenAmount ?? "0");
+    const row = tokenHeld.get(key) ?? { total: 0n, largest: 0n };
+    row.total += amount;
+    if (amount > row.largest) row.largest = amount;
+    tokenHeld.set(key, row);
+  }
+  const spendableSend =
+    sendAsset.kind === "bch"
+      ? bchHeld > BCH_RESERVE
+        ? bchHeld - BCH_RESERVE
+        : 0n
+      : (tokenHeld.get(sendAsset.category.replace(/^0x/, "").toLowerCase())?.largest ?? 0n);
+  const availableText =
+    sendAsset.kind === "bch"
+      ? `${bchOf(spendableSend)} BCH`
+      : `${fromBase(spendableSend, sendAsset.decimals)} ${sendAsset.symbol}`;
+
+  function assetForCategory(category: string): Asset {
+    const known = tokens.find((token) => token.category.toLowerCase() === category);
+    if (known !== undefined) {
+      return {
+        kind: "token",
+        category: known.category,
+        symbol: known.symbol,
+        decimals: known.decimals,
+        icon: known.icon,
+        usd: known.usd,
+      };
+    }
+    if (sendAsset.kind === "token" && sendAsset.category.replace(/^0x/, "").toLowerCase() === category) return sendAsset;
+    if (receiveAsset.kind === "token" && receiveAsset.category.replace(/^0x/, "").toLowerCase() === category) return receiveAsset;
+    return { kind: "token", category, symbol: `${category.slice(0, 4)}…${category.slice(-4)}`, decimals: 0 };
+  }
+
+  function applyPortion(percent: number) {
+    if (!wallet) {
+      setShowConnect(true);
+      return;
+    }
+    if (spendableSend === 0n) return;
+    const amount = (spendableSend * BigInt(percent)) / 100n;
+    const text = sendAsset.kind === "bch" ? bchOf(amount) : fromBase(amount, sendAsset.decimals);
+    writeSend(text, percent);
+  }
 
   async function copyProof() {
     if (proof === "") return;
@@ -663,29 +841,29 @@ export function Swap() {
 
   return (
     <main className="desk">
+      <div className="banner">
+        <a href="/AtomCash-BLAZE-2026.pptx">Presentation</a>
+        <a href="https://github.com/Utitofon-Udoekong/atomcash">Repository</a>
+        <span>
+          EMBER2026 <span className="banner-addr">bitcoincash:zq5hh46r4kudjpsayg58gu99h03p00nw4csaumqgy0</span>
+        </span>
+      </div>
       <header className="nav">
         <span className="mark">AtomCash</span>
         <div className="nav-actions">
-          <div className="net" role="group" aria-label="Network">
-            <button type="button" aria-pressed={network === "chipnet"} disabled={locked} onClick={() => setNetwork("chipnet")}>
-              Chipnet
-            </button>
-            <button type="button" aria-pressed={network === "mainnet"} disabled={locked} onClick={() => setNetwork("mainnet")}>
-              Mainnet
-            </button>
-          </div>
           <button className="connect" type="button" onClick={() => setShowConnect(true)}>
             {wallet ? "Connected" : "Connect"}
           </button>
         </div>
       </header>
+      {account !== null ? <p className="account">{account}</p> : null}
       <section className="stage">
         <div className="brief">
           <h1>Start a private swap</h1>
           <div className="facts">
             <div>
               <span>Fee</span>
-              {FEE_SATS} sats
+              {FEE_SATS.toLocaleString("en-US")} sats
             </div>
             <div>
               <span>Refund</span>3 min
@@ -709,11 +887,51 @@ export function Swap() {
                   Fixed rate
                 </button>
               </div>
+              {wallet ? (
+                <div className="holdings" aria-label="Wallet balances">
+                  <button type="button" onClick={() => chooseSend({ kind: "bch", category: "", symbol: "BCH", decimals: 8, usd: bchUsd })}>
+                    {bchOf(bchHeld)} BCH
+                  </button>
+                  {[...tokenHeld].map(([category, row]) => {
+                    const asset = assetForCategory(category);
+                    return (
+                      <button key={category} type="button" onClick={() => chooseSend(asset)}>
+                        {fromBase(row.total, asset.decimals)} {asset.symbol}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
               <div className="field">
                 <span className="field-label">You send</span>
                 <div className="field-row">
                   <input aria-label="You send" value={sendText} onChange={(event) => onSend(event.target.value)} inputMode="decimal" />
-                  <AssetSelect asset={sendAsset} tokens={tokens} bchUsd={bchUsd} onChange={setSendAsset} />
+                  <AssetSelect
+                    asset={sendAsset}
+                    tokens={tokens}
+                    bchUsd={bchUsd}
+                    onChange={(asset) => {
+                      setPortion(null);
+                      setSendAsset(asset);
+                    }}
+                  />
+                </div>
+                <div className="available">
+                  <span>Available</span>
+                  <span>{wallet ? availableText : "Connect a wallet"}</span>
+                </div>
+                <div className="stops" role="group" aria-label="Portion of available balance">
+                  {PORTIONS.map((percent) => (
+                    <button
+                      key={percent}
+                      type="button"
+                      aria-pressed={portion === percent}
+                      disabled={wallet && spendableSend === 0n}
+                      onClick={() => applyPortion(percent)}
+                    >
+                      {percent}%
+                    </button>
+                  ))}
                 </div>
               </div>
               <button className="switch" type="button" onClick={flipAssets}>
@@ -729,7 +947,10 @@ export function Swap() {
               <TokenId
                 label="Send token id"
                 asset={sendAsset}
-                onChange={(category) => setSendAsset({ ...sendAsset, kind: "token", category })}
+                onChange={(category) => {
+                  setPortion(null);
+                  setSendAsset({ ...sendAsset, kind: "token", category });
+                }}
               />
               <TokenId
                 label="Receive token id"
@@ -791,7 +1012,7 @@ export function Swap() {
       </section>
       <footer className="foot">
         <span>AtomCash</span>
-        <span>{network}</span>
+        <span>mainnet</span>
       </footer>
       {showConnect && uri !== null ? (
         <div className="overlay" onClick={() => setShowConnect(false)}>

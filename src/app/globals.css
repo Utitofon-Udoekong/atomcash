@@ -38,6 +38,24 @@ button:disabled { cursor: default; opacity: 0.45; }
   flex-direction: column;
 }
 
+.banner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  padding: 10px 32px;
+  border-bottom: 1px solid #1c201d;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.banner a {
+  color: var(--text);
+}
+
+.banner-addr {
+  font-family: var(--font-mono), monospace;
+}
+
 .nav {
   display: flex;
   align-items: center;
@@ -45,6 +63,15 @@ button:disabled { cursor: default; opacity: 0.45; }
   gap: 24px;
   padding: 18px 32px;
   border-bottom: 1px solid #1c201d;
+}
+
+.account {
+  margin: 0;
+  padding: 0 32px 14px;
+  color: var(--muted);
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  word-break: break-all;
 }
 
 .mark {
@@ -56,24 +83,6 @@ button:disabled { cursor: default; opacity: 0.45; }
   display: flex;
   align-items: center;
   gap: 12px;
-}
-
-.net {
-  display: inline-flex;
-  border: 1px solid var(--line);
-}
-
-.net button {
-  background: transparent;
-  border: 0;
-  color: var(--muted);
-  padding: 7px 10px;
-  font-size: 13px;
-}
-
-.net button[aria-pressed="true"] {
-  background: var(--paper);
-  color: var(--ink);
 }
 
 .connect {
@@ -182,6 +191,57 @@ button:disabled { cursor: default; opacity: 0.45; }
   padding: 0;
   font-size: 22px;
   outline: none;
+}
+
+.holdings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 12px 0;
+}
+
+.holdings button {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  padding: 4px 8px;
+}
+
+.available {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.stops {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  margin-top: 6px;
+}
+
+.stops button {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  padding: 6px 0;
+}
+
+.stops button + button {
+  border-left: 0;
+}
+
+.stops button[aria-pressed="true"] {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.stops button:disabled {
+  opacity: 0.4;
 }
 
 .switch {
