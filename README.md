@@ -29,12 +29,12 @@ The preimage that releases one side releases the other. One wrong byte fails the
 
 ## Mainnet
 
-One completed swap, 0.00005214 BCH for 0.01 PUSD. Explorer: https://imaginary.cash/tx/
+One completed swap, 0.00005214 BCH for 0.01 PUSD. Explorer: https://blockchair.com/bitcoin-cash/transaction/
 
 | Step | Txid |
 | --- | --- |
-| PUSD claim | `1a4ef4d7cfb587f775b66b718f48aba5a234183e41d14f2e895ef95c8d4017ac` paid 0.01 PUSD to `bitcoincash:zq5hh46r4kudjpsayg58gu99h03p00nw4csaumqgy0` |
-| BCH claim | `4c1dd8c13e69ef86f17c81c860bd3bcf82330541637374ece41635ee28c7b75b` paid 0.00005214 BCH to `bitcoincash:zpgn4m5xa08wqrlf3570070vjsdxj9emdv9gmqxgjp` |
+| PUSD claim | [`1a4ef4d7cfb587f775b66b718f48aba5a234183e41d14f2e895ef95c8d4017ac`](https://blockchair.com/bitcoin-cash/transaction/1a4ef4d7cfb587f775b66b718f48aba5a234183e41d14f2e895ef95c8d4017ac) paid 0.01 PUSD to `bitcoincash:zq5hh46r4kudjpsayg58gu99h03p00nw4csaumqgy0` |
+| BCH claim | [`4c1dd8c13e69ef86f17c81c860bd3bcf82330541637374ece41635ee28c7b75b`](https://blockchair.com/bitcoin-cash/transaction/4c1dd8c13e69ef86f17c81c860bd3bcf82330541637374ece41635ee28c7b75b) paid 0.00005214 BCH to `bitcoincash:zpgn4m5xa08wqrlf3570070vjsdxj9emdv9gmqxgjp` |
 
 Each claim also paid 1,000 sats to the CashTokens address above.
 

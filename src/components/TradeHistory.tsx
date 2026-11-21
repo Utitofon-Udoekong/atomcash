@@ -9,6 +9,10 @@ function shortId(id: string): string {
   return `${id.slice(0, 8)}…${id.slice(-8)}`;
 }
 
+function txUrl(id: string): string {
+  return `https://blockchair.com/bitcoin-cash/transaction/${id}`;
+}
+
 export function TradeHistory({ trades }: { trades: TradeRecord[] }) {
   return (
     <section className="history" aria-label="Trade history">
@@ -24,11 +28,11 @@ export function TradeHistory({ trades }: { trades: TradeRecord[] }) {
             <div key={trade.claim} className="history-row">
               <span className="trade-pair">{trade.pair}</span>
               <span className="history-ids">
-                <a href={`https://imaginary.cash/tx/${trade.claim}`} title={trade.claim}>
+                <a href={txUrl(trade.claim)} title={trade.claim}>
                   {shortId(trade.claim)}
                 </a>
                 {trade.payout !== undefined ? (
-                  <a href={`https://imaginary.cash/tx/${trade.payout}`} title={trade.payout}>
+                  <a href={txUrl(trade.payout)} title={trade.payout}>
                     {shortId(trade.payout)}
                   </a>
                 ) : null}
