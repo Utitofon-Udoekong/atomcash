@@ -4,6 +4,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import QRCode from "qrcode";
 import { DappConnectionManager } from "@wizardconnect/dapp";
 import { initiateDappRelay, type DappRelayResult } from "@wizardconnect/core";
+import { sourceOutputToRelay, type SourceOutput } from "@wizardconnect/core/hdwalletv1-serialize";
+import { matchingOffer, type Offer, type OfferAsset, type OfferView } from "@/lib/offer";
+import { displayCategory } from "@/lib/token";
+import { OpenTrades } from "@/components/OpenTrades";
+import { TradeHistory } from "@/components/TradeHistory";
 
 type NetName = "mainnet";
 type AssetKind = "bch" | "token";
@@ -70,6 +75,9 @@ interface Session {
   bobTimeout: number;
   network: NetName;
   changeAddress: string;
+  role: "maker" | "taker";
+  sendText: string;
+  receiveText: string;
 }
 
 interface UtxoSeen {
@@ -83,10 +91,12 @@ interface UtxoSeen {
 type Phase =
   | { name: "idle" }
   | { name: "quote" }
+  | { name: "offering"; offerId: string; session: Session }
+  | { name: "taking"; offerId: string; session: Session }
   | { name: "deposit_shown"; session: Session }
   | { name: "payment_seen"; session: Session; deposit: UtxoSeen; mirror?: UtxoSeen }
   | { name: "output_shown"; session: Session; txid: string }
-  | { name: "refund_available"; session: Session; deposit: UtxoSeen; txid?: string };
+  | { name: "refund_available"; session: Session; deposit: UtxoSeen; txid?: string; which?: "alice" | "bob" };
 
 interface WireSource {
   outpointTransactionHash: string;
@@ -105,6 +115,7 @@ const OWNER_FEE_SATS = 1_000;
 const FEE_SATS = MINER_FEE_SATS + OWNER_FEE_SATS;
 const BCH_RESERVE = 3_000n;
 const PORTIONS = [25, 50, 75, 100] as const;
+const MAKER_KEY = "atomcash-maker";
 
 function hexToBytes(hex: string): Uint8Array {
   const out = new Uint8Array(hex.length / 2);
@@ -174,6 +185,38 @@ function quotedReceive(send: Asset, receive: Asset, sendAmount: string, bchPrice
   return amount.toFixed(places).replace(/\.?0+$/, "");
 }
 
+function quotedSend(send: Asset, receive: Asset, receiveAmount: string, bchPrice: number): string {
+  return quotedReceive(receive, send, receiveAmount, bchPrice);
+}
+
+function said(code: string): string {
+  switch (code) {
+    case "wallet":
+      return "The wallet is not connected. Click Connect and approve it in the wallet.";
+    case "funds":
+    case "bch-funds":
+      return "This wallet does not hold enough BCH. The lock needs the amount plus 1,800 sats.";
+    case "token-funds":
+      return "This wallet does not hold enough of that CashToken on its receive or change addresses.";
+    case "rejected":
+      return "The wallet or the network rejected the transaction.";
+    case "timeout":
+      return "The refund is not open yet. Wait for the timeout.";
+    case "taken":
+      return "Someone already took that offer.";
+    case "missing":
+      return "That offer is no longer in the pool.";
+    case "secret":
+      return "The preimage does not match this contract.";
+    case "token":
+      return "Choose the CashToken.";
+    case "amount":
+      return "Enter an amount greater than zero.";
+    default:
+      return code;
+  }
+}
+
 async function post<T>(body: unknown): Promise<T> {
   const response = await fetch("/api/bch", {
     method: "POST",
@@ -192,6 +235,10 @@ function headline(phase: Phase): string {
     case "idle":
     case "quote":
       return "";
+    case "offering":
+      return phase.offerId;
+    case "taking":
+      return phase.session.bob.address;
     case "deposit_shown":
       return phase.session.alice.address;
     case "payment_seen":
@@ -199,7 +246,7 @@ function headline(phase: Phase): string {
     case "output_shown":
       return phase.txid;
     case "refund_available":
-      return phase.txid ?? phase.session.alice.address;
+      return phase.txid ?? (phase.which === "bob" ? phase.session.bob.address : phase.session.alice.address);
     default: {
       const unreachable: never = phase;
       return unreachable;
@@ -212,10 +259,14 @@ function slipLabel(phase: Phase): string {
     case "idle":
     case "quote":
       return "";
+    case "offering":
+      return "Offer id";
+    case "taking":
+      return "Your contract";
     case "deposit_shown":
-      return "Deposit address";
+      return "Your contract";
     case "payment_seen":
-      return "Counterparty contract";
+      return "Their contract";
     case "output_shown":
       return "Claim";
     case "refund_available":
@@ -232,14 +283,20 @@ function statusLine(phase: Phase): string {
     case "idle":
     case "quote":
       return "";
+    case "offering":
+      return `In the pool for 30 minutes. ${phase.session.sendText} ${phase.session.send.symbol} → ${phase.session.receiveText} ${phase.session.receive.symbol}. Keep this page open.`;
+    case "taking":
+      return "Waiting for them";
     case "deposit_shown":
-      return "Waiting for the deposit";
+      return "Waiting for your lock";
     case "payment_seen":
-      return phase.mirror === undefined ? "Deposit seen" : "Both contracts are funded";
+      return phase.mirror === undefined ? "Waiting for them" : "Both sides are locked";
     case "output_shown":
-      return "Payout broadcast";
+      return "Payout broadcast. Check both wallets.";
     case "refund_available":
-      return phase.txid === undefined ? "Refund available" : "Refund broadcast";
+      return phase.txid === undefined
+        ? "Refund available. Check the wallet before refunding."
+        : "Refund broadcast. Check the wallet.";
     default: {
       const unreachable: never = phase;
       return unreachable;
@@ -249,12 +306,30 @@ function statusLine(phase: Phase): string {
 
 let pairing: { manager: DappConnectionManager; relay: DappRelayResult } | null = null;
 
+function closePairing(): void {
+  const current = pairing;
+  if (current === null) return;
+  pairing = null;
+  current.manager.clearStoredSession();
+  void current.manager.sendDisconnect("Disconnect").catch(() => undefined);
+  current.relay.cleanup();
+  void current.manager.destroy();
+}
+
 function openPairing(): { manager: DappConnectionManager; relay: DappRelayResult } {
   if (pairing !== null) return pairing;
-  const manager = new DappConnectionManager("AtomCash", undefined, { session: false });
-  const relay = initiateDappRelay((payload) => {
-    manager.updateConnection(payload.client, payload.status);
-  });
+  const manager = new DappConnectionManager("AtomCash");
+  const stored = manager.loadStoredSession();
+  const existing =
+    stored?.privateKey !== undefined && stored.secret !== undefined && stored.walletPublicKey !== undefined
+      ? { privateKey: stored.privateKey, secret: stored.secret, walletPublicKey: stored.walletPublicKey }
+      : undefined;
+  const relay = initiateDappRelay(
+    (payload) => {
+      manager.updateConnection(payload.client, payload.status);
+    },
+    existing === undefined ? undefined : { existingCredentials: existing },
+  );
   manager.attachRelay(relay);
   pairing = { manager, relay };
   return pairing;
@@ -267,17 +342,74 @@ function qrTarget(phase: Phase, showConnect: boolean, uri: string | null): strin
     case "quote":
     case "output_shown":
       return null;
+    case "offering":
+      return null;
+    case "taking":
+      return phase.session.bob.address === "" ? null : phase.session.bob.address;
     case "deposit_shown":
       return phase.session.alice.address;
     case "payment_seen":
       return phase.session.bob.address;
     case "refund_available":
-      return phase.txid === undefined ? phase.session.alice.address : null;
+      return phase.txid === undefined ? (phase.which === "bob" ? phase.session.bob.address : phase.session.alice.address) : null;
     default: {
       const unreachable: never = phase;
       return unreachable;
     }
   }
+}
+
+function baseOf(asset: Asset, text: string): bigint {
+  const trimmed = text.trim();
+  if (!/^\d*\.?\d*$/.test(trimmed) || trimmed === "" || trimmed === ".") return 0n;
+  return asset.kind === "bch" ? satsOf(trimmed) : BigInt(toBase(trimmed, asset.decimals));
+}
+
+function asOffer(asset: Asset, text: string): OfferAsset {
+  const trimmed = text.trim();
+  const base = baseOf(asset, trimmed).toString();
+  return {
+    kind: asset.kind,
+    category: asset.kind === "token" ? asset.category.replace(/^0x/, "").toLowerCase() : "",
+    symbol: asset.symbol,
+    decimals: asset.decimals,
+    text: trimmed,
+    base,
+  };
+}
+
+function withContracts(session: Session, offer: Offer): Session {
+  if (offer.alice === undefined || offer.bob === undefined) return session;
+  return {
+    ...session,
+    alice: offer.alice,
+    bob: offer.bob,
+    aliceTimeout: offer.alice.side.timeout,
+    bobTimeout: offer.bob.side.timeout,
+    payoutLock: offer.bob.side.payoutLock,
+    refundLock: offer.alice.side.refundLock,
+    solverLock: offer.alice.side.payoutLock,
+    secretHash: offer.secretHash,
+  };
+}
+
+async function offerSend<T>(body: unknown): Promise<T> {
+  const response = await fetch("/api/offers", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const json = (await response.json()) as T & { error?: string };
+  if (!response.ok) throw new Error(json.error ?? "rejected");
+  return json;
+}
+
+async function offerRead(id: string): Promise<Offer | null> {
+  const response = await fetch(`/api/offers?id=${encodeURIComponent(id)}`);
+  if (response.status === 404) return null;
+  const json = (await response.json()) as Offer & { error?: string };
+  if (!response.ok) throw new Error(json.error ?? "rejected");
+  return json;
 }
 
 function pairRate(send: Asset, receive: Asset, sendText: string, receiveText: string): string | null {
@@ -317,8 +449,20 @@ export function Swap() {
   const [showConnect, setShowConnect] = useState(false);
   const [fail, setFail] = useState<string | null>(null);
   const [secretEdit, setSecretEdit] = useState<string | null>(null);
+  const [offers, setOffers] = useState<OfferView[]>([]);
+  const [history, setHistory] = useState<{ at: number; pair: string; claim: string; payout?: string }[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [working, setWorking] = useState<string | null>(null);
+  const [seeking, setSeeking] = useState(false);
+  const [pairGeneration, setPairGeneration] = useState(0);
   const bobFunded = useRef(false);
   const claimed = useRef<string | null>(null);
+  const pendingOffer = useRef<OfferView | null>(null);
+  const joining = useRef(false);
+  const takerClaimed = useRef(false);
+  const resumed = useRef(false);
+  const quoteFrom = useRef<"send" | "receive">("send");
+  const takeRef = useRef<(offer: OfferView) => Promise<void>>(async () => undefined);
 
   useEffect(() => {
     let cancel = false;
@@ -349,8 +493,12 @@ export function Swap() {
 
   useEffect(() => {
     if (mode !== "float" || bchUsd <= 0) return;
+    if (quoteFrom.current === "receive") {
+      setSendText(quotedSend(sendAsset, receiveAsset, receiveText, bchUsd));
+      return;
+    }
     setReceiveText(quotedReceive(sendAsset, receiveAsset, sendText, bchUsd));
-  }, [mode, bchUsd, sendAsset, receiveAsset, sendText]);
+  }, [mode, bchUsd, sendAsset, receiveAsset, receiveText, sendText]);
 
   async function accountOf(current: DappConnectionManager): Promise<void> {
     const pub = current.getPubkey(0, 0n);
@@ -372,6 +520,7 @@ export function Swap() {
       void accountOf(session.manager).catch(() => undefined);
     };
     const onDisconnect = () => {
+      session.manager.clearStoredSession();
       setWallet(false);
       setAccount(null);
       setCoins([]);
@@ -382,7 +531,7 @@ export function Swap() {
     setManager(session.manager);
     setUri(session.relay.uri);
     setQrUri(session.relay.qrUri);
-    if (session.manager.isWalletDiscovered()) {
+    if (session.manager.isWalletDiscovered() || session.manager.getPubkey(0, 0n) !== undefined) {
       setWallet(true);
       void accountOf(session.manager).catch(() => undefined);
     }
@@ -390,7 +539,20 @@ export function Swap() {
       session.manager.off("walletready", onReady);
       session.manager.off("disconnect", onDisconnect);
     };
-  }, []);
+  }, [pairGeneration]);
+
+  function disconnectWallet() {
+    closePairing();
+    setWallet(false);
+    setAccount(null);
+    setCoins([]);
+    setPortion(null);
+    setShowConnect(false);
+    setManager(null);
+    setUri(null);
+    setQrUri(null);
+    setPairGeneration((value) => value + 1);
+  }
 
   useEffect(() => {
     if (!wallet || manager === null) return;
@@ -462,6 +624,7 @@ export function Swap() {
   }, [quoted]);
 
   function writeSend(value: string, nextPortion: number | null) {
+    quoteFrom.current = "send";
     setPortion(nextPortion);
     setSendText(value);
     if (mode === "float") setReceiveText(quotedReceive(sendAsset, receiveAsset, value, bchUsd));
@@ -469,6 +632,13 @@ export function Swap() {
 
   function onSend(value: string) {
     writeSend(value, null);
+  }
+
+  function onReceive(value: string) {
+    quoteFrom.current = "receive";
+    setPortion(null);
+    setReceiveText(value);
+    if (mode === "float") setSendText(quotedSend(sendAsset, receiveAsset, value, bchUsd));
   }
 
   function chooseSend(asset: Asset) {
@@ -484,47 +654,41 @@ export function Swap() {
     setReceiveText(sendText);
   }
 
+  async function scanWallet(current: DappConnectionManager): Promise<Coin[]> {
+    const chains = [
+      { child: 0, pathName: "receive", count: 20 },
+      { child: 1, pathName: "change", count: 10 },
+    ] as const;
+    const rows: { pubkeyHex: string; pathName: string; pathIndex: number }[] = [];
+    for (const chain of chains) {
+      for (let index = 0; index < chain.count; index += 1) {
+        const pub = current.getPubkey(chain.child, BigInt(index));
+        if (pub === undefined) break;
+        rows.push({ pubkeyHex: bytesToHex(pub), pathName: chain.pathName, pathIndex: index });
+      }
+    }
+    if (rows.length === 0) return [];
+    const listed = await post<{ utxos: Coin[] }>({ op: "coins", network, rows });
+    const known = tokens.map((token) => token.category);
+    const seen = new Set<string>();
+    const unique: Coin[] = [];
+    for (const coin of listed.utxos) {
+      const key = `${coin.txid}:${coin.vout}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const category = displayCategory(coin.tokenCategory, known);
+      unique.push(category === undefined ? coin : { ...coin, tokenCategory: category });
+    }
+    return unique;
+  }
+
   useEffect(() => {
     const watching = phase.name === "idle" || phase.name === "quote";
     if (!wallet || manager === null || !watching) return;
     let cancel = false;
     async function load() {
       if (manager === null) return;
-      const receive = manager.getPubkey(0, 0n);
-      const change = manager.getPubkey(1, 0n);
-      if (receive === undefined || change === undefined) return;
-      const specs = [
-        { pub: receive, token: false, pathName: "receive", pathIndex: 0 },
-        { pub: receive, token: true, pathName: "receive", pathIndex: 0 },
-        { pub: change, token: false, pathName: "change", pathIndex: 0 },
-        { pub: change, token: true, pathName: "change", pathIndex: 0 },
-      ];
-      const locks = await Promise.all(
-        specs.map((row) =>
-          post<{ address: string }>({
-            op: "lock",
-            network,
-            pubkeyHex: bytesToHex(row.pub),
-            token: row.token,
-          }),
-        ),
-      );
-      const seenAddress = new Set<string>();
-      const targets: { address: string; pathName: string; pathIndex: number }[] = [];
-      specs.forEach((row, index) => {
-        const address = locks[index]?.address;
-        if (address === undefined || seenAddress.has(address)) return;
-        seenAddress.add(address);
-        targets.push({ address, pathName: row.pathName, pathIndex: row.pathIndex });
-      });
-      const listed = await coinsOf(targets);
-      const seenCoin = new Set<string>();
-      const unique = listed.filter((coin) => {
-        const key = `${coin.txid}:${coin.vout}`;
-        if (seenCoin.has(key)) return false;
-        seenCoin.add(key);
-        return true;
-      });
+      const unique = await scanWallet(manager);
       if (!cancel) setCoins(unique);
     }
     void load().catch(() => undefined);
@@ -535,7 +699,7 @@ export function Swap() {
       cancel = true;
       clearInterval(timer);
     };
-  }, [wallet, manager, network, phase.name]);
+  }, [wallet, manager, network, phase.name, tokens]);
 
   async function locks() {
     if (manager === null || !wallet) throw new Error("wallet");
@@ -600,18 +764,21 @@ export function Swap() {
     const signed = await manager.signTransaction({
       transaction: {
         transaction: built.transactionHex,
-        sourceOutputs: built.sourceOutputs.map((row) => ({
-          outpointTransactionHash: hexToBytes(row.outpointTransactionHash),
-          outpointIndex: row.outpointIndex,
-          sequenceNumber: row.sequenceNumber,
-          unlockingBytecode: hexToBytes(row.unlockingBytecode),
-          lockingBytecode: hexToBytes(row.lockingBytecode),
-          valueSatoshis: BigInt(row.valueSatoshis),
-          token:
-            row.token === undefined
-              ? undefined
-              : { amount: BigInt(row.token.amount), category: hexToBytes(row.token.category) },
-        })),
+        sourceOutputs: built.sourceOutputs.map((row) => {
+          const native: SourceOutput = {
+            outpointTransactionHash: hexToBytes(row.outpointTransactionHash),
+            outpointIndex: Number(row.outpointIndex),
+            sequenceNumber: Number(row.sequenceNumber),
+            unlockingBytecode: hexToBytes(row.unlockingBytecode),
+            lockingBytecode: hexToBytes(row.lockingBytecode),
+            valueSatoshis: BigInt(row.valueSatoshis),
+            token:
+              row.token === undefined
+                ? undefined
+                : { amount: BigInt(row.token.amount), category: hexToBytes(row.token.category) },
+          };
+          return sourceOutputToRelay(native);
+        }),
         userPrompt: "AtomCash",
         broadcast: false,
       },
@@ -621,72 +788,155 @@ export function Swap() {
     await post({ op: "broadcast", network, hex: signed.signedTransaction });
   }
 
-  async function exchange() {
-    setFail(null);
-    bobFunded.current = false;
-    claimed.current = null;
-    if (!wallet) {
-      setShowConnect(true);
-      return;
-    }
-    const secretBytes = crypto.getRandomValues(new Uint8Array(32));
-    const secret = bytesToHex(secretBytes);
-    const secretHash = await sha256Hex(secretBytes);
+  async function fundingCoins(): Promise<{ coins: Coin[]; changeAddress: string; refundLock: string; payoutLock: string }> {
     const { encoded, changeAddress } = await locks();
     const refundLock = encoded[0]?.lockingBytecode;
     const payoutLock = encoded[1]?.lockingBytecode;
-    const solverLock = encoded[2]?.lockingBytecode;
-    if (refundLock === undefined || payoutLock === undefined || solverLock === undefined) return;
-    const now = Math.floor(Date.now() / 1000);
-    const sendTokens = sendAsset.kind === "token" ? toBase(sendText, sendAsset.decimals) : "0";
-    const receiveTokens = receiveAsset.kind === "token" ? toBase(receiveText, receiveAsset.decimals) : "0";
-    const sendSats = sendAsset.kind === "bch" ? satsOf(sendText).toString() : "0";
-    const receiveSats = receiveAsset.kind === "bch" ? satsOf(receiveText).toString() : "0";
-    const aliceSide: SideInput = {
-      timeout: now + ALICE_WINDOW,
-      secretHash,
-      payoutLock: solverLock,
-      refundLock,
-      tokenCategory: sendAsset.kind === "token" ? sendAsset.category : "",
-      tokenAmount: sendTokens,
-    };
-    const bobSide: SideInput = {
-      timeout: now + BOB_WINDOW,
-      secretHash,
-      payoutLock,
-      refundLock: solverLock,
-      tokenCategory: receiveAsset.kind === "token" ? receiveAsset.category : "",
-      tokenAmount: receiveTokens,
-    };
-    const alicePrep = await post<{ address: string }>({ op: "prepare", network, side: aliceSide });
-    const bobPrep = await post<{ address: string }>({ op: "prepare", network, side: bobSide });
-    const session: Session = {
-      secret,
-      secretHash,
-      send: sendAsset,
-      receive: receiveAsset,
-      sendSats,
-      receiveSats,
-      sendTokens,
-      receiveTokens,
-      alice: { address: alicePrep.address, side: aliceSide },
-      bob: { address: bobPrep.address, side: bobSide },
-      payoutLock,
-      refundLock,
-      solverLock,
-      aliceTimeout: aliceSide.timeout,
-      bobTimeout: bobSide.timeout,
-      network,
-      changeAddress,
-    };
-    setSecretEdit(secret);
-    setPhase({ name: "deposit_shown", session });
-    const walletCoins = await coinsOf([
-      { address: encoded[0]?.address ?? "", pathName: "receive", pathIndex: 0 },
-      { address: changeAddress, pathName: "change", pathIndex: 0 },
-    ]);
-    await fundSide(session, "alice", walletCoins);
+    if (refundLock === undefined || payoutLock === undefined || manager === null) throw new Error("wallet");
+    const unique = await scanWallet(manager);
+    return { coins: unique, changeAddress, refundLock, payoutLock };
   }
+
+  function blankSide(secretHash: string, payoutLock: string, refundLock: string): SideInput {
+    return { timeout: 0, secretHash, payoutLock, refundLock, tokenCategory: "", tokenAmount: "0" };
+  }
+
+  async function listedOffers(): Promise<OfferView[]> {
+    const response = await fetch("/api/offers");
+    const body = (await response.json()) as { offers?: OfferView[] };
+    return body.offers ?? [];
+  }
+
+  async function lookForMatch(send: OfferAsset, want: OfferAsset): Promise<OfferView | undefined> {
+    const ready = matchingOffer(await listedOffers(), send, want);
+    if (ready !== undefined) return ready;
+    await new Promise((resolve) => setTimeout(resolve, 5000));
+    return matchingOffer(await listedOffers(), send, want);
+  }
+
+  async function publish() {
+    setFail(null);
+    bobFunded.current = false;
+    claimed.current = null;
+    joining.current = false;
+    if (!wallet || !quoted || seeking) return;
+    const send = asOffer(sendAsset, sendText);
+    const want = asOffer(receiveAsset, receiveText);
+    if (BigInt(send.base) <= 0n || BigInt(want.base) <= 0n) return;
+    if ((send.kind === "token" && send.category === "") || (want.kind === "token" && want.category === "")) {
+      setFail("Choose the token.");
+      return;
+    }
+    setSeeking(true);
+    try {
+      const match = await lookForMatch(send, want);
+      if (match !== undefined && (await take(match)) !== "gone") return;
+      const secretBytes = crypto.getRandomValues(new Uint8Array(32));
+      const secret = bytesToHex(secretBytes);
+      const secretHash = await sha256Hex(secretBytes);
+      const { changeAddress, refundLock, payoutLock } = await fundingCoins();
+      const id = bytesToHex(crypto.getRandomValues(new Uint8Array(8)));
+      await offerSend({ op: "open", id, send, want, secretHash, makerRefundLock: refundLock, makerPayoutLock: payoutLock });
+      const session: Session = {
+        secret,
+        secretHash,
+        send: sendAsset,
+        receive: receiveAsset,
+        sendSats: send.kind === "bch" ? send.base : "0",
+        receiveSats: want.kind === "bch" ? want.base : "0",
+        sendTokens: send.kind === "token" ? send.base : "0",
+        receiveTokens: want.kind === "token" ? want.base : "0",
+        sendText: send.text,
+        receiveText: want.text,
+        alice: { address: "", side: blankSide(secretHash, payoutLock, refundLock) },
+        bob: { address: "", side: blankSide(secretHash, payoutLock, refundLock) },
+        payoutLock,
+        refundLock,
+        solverLock: payoutLock,
+        aliceTimeout: 0,
+        bobTimeout: 0,
+        network,
+        changeAddress,
+        role: "maker",
+      };
+      setSecretEdit(secret);
+      sessionStorage.setItem(MAKER_KEY, JSON.stringify({ offerId: id, session }));
+      setPhase({ name: "offering", offerId: id, session });
+    } finally {
+      setSeeking(false);
+    }
+  }
+
+  async function take(offer: OfferView) {
+    if (!wallet) {
+      pendingOffer.current = offer;
+      setShowConnect(true);
+      return "failed";
+    }
+    if (phase.name === "offering" && phase.offerId === offer.id) return "failed";
+    setFail(null);
+    setWorking("Checking the wallet for that CashToken.");
+    setBusy(true);
+    takerClaimed.current = false;
+    let reserved: Offer | null = null;
+    try {
+      const { coins: walletCoins, changeAddress, refundLock, payoutLock } = await fundingCoins();
+      reserved = await offerSend<Offer>({ op: "take", id: offer.id, takerRefundLock: refundLock, takerPayoutLock: payoutLock });
+      if (reserved.alice === undefined || reserved.bob === undefined) throw new Error("rejected");
+      const session: Session = withContracts(
+        {
+          secret: "",
+          secretHash: reserved.secretHash,
+          send: {
+            kind: reserved.send.kind,
+            category: reserved.send.category,
+            symbol: reserved.send.symbol,
+            decimals: reserved.send.decimals,
+          },
+          receive: {
+            kind: reserved.want.kind,
+            category: reserved.want.category,
+            symbol: reserved.want.symbol,
+            decimals: reserved.want.decimals,
+          },
+          sendSats: reserved.send.kind === "bch" ? reserved.send.base : "0",
+          receiveSats: reserved.want.kind === "bch" ? reserved.want.base : "0",
+          sendTokens: reserved.send.kind === "token" ? reserved.send.base : "0",
+          receiveTokens: reserved.want.kind === "token" ? reserved.want.base : "0",
+          sendText: reserved.send.text,
+          receiveText: reserved.want.text,
+          alice: reserved.alice,
+          bob: reserved.bob,
+          payoutLock: reserved.bob.side.payoutLock,
+          refundLock: reserved.bob.side.refundLock,
+          solverLock: reserved.alice.side.payoutLock,
+          aliceTimeout: reserved.alice.side.timeout,
+          bobTimeout: reserved.bob.side.timeout,
+          network,
+          changeAddress,
+          role: "taker",
+        },
+        reserved,
+      );
+      await fundSide(session, "bob", walletCoins);
+      setSecretEdit(null);
+      setPhase({ name: "taking", offerId: offer.id, session });
+      return "done";
+    } catch (error) {
+      if (reserved !== null) {
+        await offerSend({ op: "release", id: offer.id }).catch(() => undefined);
+      }
+      const message = error instanceof Error ? error.message : "rejected";
+      if (message === "taken" || message === "missing") return "gone";
+      setFail(said(message));
+      return "failed";
+    } finally {
+      setBusy(false);
+      setWorking(null);
+    }
+  }
+
+  takeRef.current = take;
 
   async function finish(session: Session, deposit: UtxoSeen, mirror: UtxoSeen | undefined) {
     if (mirror === undefined) {
@@ -698,7 +948,7 @@ export function Swap() {
       try {
         await fundSide(session, "bob", walletCoins);
       } catch (error) {
-        setFail(error instanceof Error ? error.message : "funds");
+        setFail(said(error instanceof Error ? error.message : "bch-funds"));
         return;
       }
       return;
@@ -714,51 +964,227 @@ export function Swap() {
       outputLock: session.payoutLock,
     });
     if (!claimed.ok || claimed.hex === undefined) {
-      setFail(claimed.reason ?? "rejected");
+      setFail(said(claimed.reason ?? "rejected"));
       return;
     }
     const broadcasted = await post<{ txid: string }>({ op: "broadcast", network: session.network, hex: claimed.hex });
     setFail(null);
+    sessionStorage.removeItem(MAKER_KEY);
     setPhase({ name: "output_shown", session, txid: broadcasted.txid });
-    void post({
-      op: "spend",
-      network: session.network,
-      action: "claim",
-      side: session.alice.side,
-      utxo: deposit,
-      secret,
-      outputLock: session.solverLock,
-    }).then(async (other) => {
-      const row = other as { ok: boolean; hex?: string };
-      if (row.ok && row.hex !== undefined) {
-        await post({ op: "broadcast", network: session.network, hex: row.hex });
+    const pair = `${session.sendText} ${session.send.symbol} → ${session.receiveText} ${session.receive.symbol}`;
+    void (async () => {
+      let payout: string | undefined;
+      try {
+        const other = await post<{ ok: boolean; hex?: string }>({
+          op: "spend",
+          network: session.network,
+          action: "claim",
+          side: session.alice.side,
+          utxo: deposit,
+          secret,
+          outputLock: session.solverLock,
+        });
+        if (other.ok && other.hex !== undefined) {
+          const sent = await post<{ txid: string }>({ op: "broadcast", network: session.network, hex: other.hex });
+          payout = sent.txid;
+        }
+      } catch {
+        payout = undefined;
       }
-    });
+      await fetch("/api/history", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ pair, claim: broadcasted.txid, payout }),
+      });
+    })();
   }
 
-  async function refund(session: Session, deposit: UtxoSeen) {
+  async function refund(session: Session, deposit: UtxoSeen, which: "alice" | "bob" = "alice") {
+    const prepared = session[which];
     const spent = await post<{ ok: boolean; hex?: string; reason?: string }>({
       op: "spend",
       network: session.network,
       action: "refund",
-      side: session.alice.side,
+      side: prepared.side,
       utxo: deposit,
-      outputLock: session.refundLock,
+      outputLock: prepared.side.refundLock,
     });
     if (!spent.ok || spent.hex === undefined) {
-      setFail(spent.reason ?? "timeout");
+      setFail(said(spent.reason ?? "timeout"));
       return;
     }
     const broadcasted = await post<{ txid: string }>({ op: "broadcast", network: session.network, hex: spent.hex });
-    setPhase({ name: "refund_available", session, deposit, txid: broadcasted.txid });
+    sessionStorage.removeItem(MAKER_KEY);
+    setPhase({ name: "refund_available", session, deposit, txid: broadcasted.txid, which });
   }
 
   useEffect(() => {
     if (phase.name !== "payment_seen" || phase.mirror !== undefined || bobFunded.current) return;
+    if (phase.session.role !== "taker") return;
     bobFunded.current = true;
     void finish(phase.session, phase.deposit, undefined).catch((error: unknown) => {
-      setFail(error instanceof Error ? error.message : "rejected");
+      setFail(said(error instanceof Error ? error.message : "rejected"));
     });
+  }, [phase]);
+
+  useEffect(() => {
+    let cancel = false;
+    async function load() {
+      const response = await fetch("/api/offers");
+      const body = (await response.json()) as { offers?: OfferView[] };
+      if (!cancel) setOffers(body.offers ?? []);
+    }
+    void load().catch(() => undefined);
+    const timer = setInterval(() => {
+      void load().catch(() => undefined);
+    }, 5000);
+    return () => {
+      cancel = true;
+      clearInterval(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!wallet || pendingOffer.current === null) return;
+    const row = pendingOffer.current;
+    pendingOffer.current = null;
+    void takeRef.current(row).catch((error: unknown) => {
+      setFail(said(error instanceof Error ? error.message : "rejected"));
+    });
+  }, [wallet]);
+
+  useEffect(() => {
+    let cancel = false;
+    async function load() {
+      const response = await fetch("/api/history");
+      const body = (await response.json()) as { trades?: { at: number; pair: string; claim: string; payout?: string }[] };
+      if (!cancel) setHistory(body.trades ?? []);
+    }
+    void load().catch(() => undefined);
+    const timer = setInterval(() => {
+      void load().catch(() => undefined);
+    }, 12000);
+    return () => {
+      cancel = true;
+      clearInterval(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!wallet || phase.name !== "idle" || resumed.current) return;
+    const raw = sessionStorage.getItem(MAKER_KEY);
+    if (raw === null) return;
+    resumed.current = true;
+    try {
+      const saved = JSON.parse(raw) as { offerId?: string; session?: Session };
+      if (saved.offerId === undefined || saved.session?.role !== "maker") return;
+      setSecretEdit(saved.session.secret);
+      setPhase({ name: "offering", offerId: saved.offerId, session: saved.session });
+    } catch {
+      sessionStorage.removeItem(MAKER_KEY);
+    }
+  }, [wallet, phase.name]);
+
+  useEffect(() => {
+    if (phase.name !== "offering") return;
+    const session = phase.session;
+    const offerId = phase.offerId;
+    let cancel = false;
+    async function watch() {
+      if (cancel || joining.current) return;
+      const row = await offerRead(offerId);
+      if (cancel || row === null) {
+        if (!cancel && row === null) {
+          sessionStorage.removeItem(MAKER_KEY);
+          setFail("The offer left the pool after 30 minutes. Nothing was locked, so there is nothing to refund.");
+          setPhase({ name: "idle" });
+        }
+        return;
+      }
+      if (row.status !== "taken" || row.bob === undefined) return;
+      const bob = await post<{ utxos: UtxoSeen[] }>({ op: "inspect", network: session.network, address: row.bob.address });
+      if (cancel || bob.utxos[0] === undefined) return;
+      joining.current = true;
+      try {
+        const next = withContracts(session, row);
+        const alice = await post<{ utxos: UtxoSeen[] }>({ op: "inspect", network: next.network, address: next.alice.address });
+        if (alice.utxos[0] === undefined) {
+          const { coins: walletCoins } = await fundingCoins();
+          await fundSide(next, "alice", walletCoins);
+        }
+        if (!cancel) setPhase({ name: "deposit_shown", session: next });
+      } catch (error) {
+        joining.current = false;
+        if (!cancel) setFail(said(error instanceof Error ? error.message : "bch-funds"));
+      }
+    }
+    void watch().catch((error: unknown) => {
+      if (!cancel) setFail(said(error instanceof Error ? error.message : "rejected"));
+    });
+    const timer = setInterval(() => {
+      void watch().catch(() => undefined);
+    }, 5000);
+    return () => {
+      cancel = true;
+      clearInterval(timer);
+    };
+  }, [phase]);
+
+  useEffect(() => {
+    if (phase.name !== "taking") return;
+    const session = phase.session;
+    let cancel = false;
+    async function watch() {
+      if (cancel || session.bob.address === "" || session.alice.address === "") return;
+      const bob = await post<{ utxos: UtxoSeen[]; hasHistory: boolean; latestTxid?: string; preimage?: string }>({
+        op: "inspect",
+        network: session.network,
+        address: session.bob.address,
+        secretHash: session.secretHash,
+      });
+      const alice = await post<{ utxos: UtxoSeen[]; hasHistory: boolean; latestTxid?: string }>({
+        op: "inspect",
+        network: session.network,
+        address: session.alice.address,
+      });
+      if (cancel) return;
+      if (alice.utxos[0] !== undefined && bob.utxos[0] === undefined && bob.hasHistory && bob.preimage !== undefined && !takerClaimed.current) {
+        takerClaimed.current = true;
+        const claimedSide = await post<{ ok: boolean; hex?: string; reason?: string }>({
+          op: "spend",
+          network: session.network,
+          action: "claim",
+          side: session.alice.side,
+          utxo: alice.utxos[0],
+          secret: bob.preimage,
+          outputLock: session.solverLock,
+        });
+        if (!claimedSide.ok || claimedSide.hex === undefined) {
+          takerClaimed.current = false;
+          setFail(said(claimedSide.reason ?? "rejected"));
+          return;
+        }
+        const broadcasted = await post<{ txid: string }>({ op: "broadcast", network: session.network, hex: claimedSide.hex });
+        if (!cancel) setPhase({ name: "output_shown", session, txid: broadcasted.txid });
+        return;
+      }
+      if (alice.utxos[0] === undefined && alice.hasHistory && bob.utxos[0] === undefined) {
+        setPhase({ name: "output_shown", session, txid: alice.latestTxid ?? session.alice.address });
+        return;
+      }
+      if (Date.now() / 1000 >= session.bobTimeout && bob.utxos[0] !== undefined && alice.utxos[0] === undefined) {
+        setPhase({ name: "refund_available", session, deposit: bob.utxos[0], which: "bob" });
+      }
+    }
+    const timer = setInterval(() => {
+      void watch().catch((error: unknown) => {
+        if (!cancel) setFail(said(error instanceof Error ? error.message : "rejected"));
+      });
+    }, 5000);
+    return () => {
+      cancel = true;
+      clearInterval(timer);
+    };
   }, [phase]);
 
   useEffect(() => {
@@ -767,7 +1193,7 @@ export function Swap() {
     if (claimed.current === phase.mirror.txid) return;
     claimed.current = phase.mirror.txid;
     void finish(phase.session, phase.deposit, phase.mirror).catch((error: unknown) => {
-      setFail(error instanceof Error ? error.message : "rejected");
+      setFail(said(error instanceof Error ? error.message : "rejected"));
     });
   }, [phase, secretEdit]);
 
@@ -857,12 +1283,20 @@ export function Swap() {
           <button className="connect" type="button" onClick={() => setShowConnect(true)}>
             {wallet ? "Connected" : "Connect"}
           </button>
+          {wallet ? (
+            <button className="connect" type="button" onClick={disconnectWallet}>
+              Disconnect
+            </button>
+          ) : null}
         </div>
       </header>
       {account !== null ? <p className="account">{account}</p> : null}
       <section className="stage">
         <div className="brief">
-          <h1>Start a private swap</h1>
+          <div className="intro">
+            <h1>Trade with someone</h1>
+            <p className="lede">You lock what you hold. They lock what you want. Both are paid, or you take yours back.</p>
+          </div>
           <div className="facts">
             <div>
               <span>Fee</span>
@@ -879,6 +1313,7 @@ export function Swap() {
             </div>
           </div>
         </div>
+        <div className="columns">
         <div className="ticket">
           {form ? (
             <>
@@ -906,9 +1341,9 @@ export function Swap() {
                 </div>
               ) : null}
               <div className="field">
-                <span className="field-label">You send</span>
+                <span className="field-label">You lock</span>
                 <div className="field-row">
-                  <input aria-label="You send" value={sendText} onChange={(event) => onSend(event.target.value)} inputMode="decimal" />
+                  <input aria-label="You lock" value={sendText} onChange={(event) => onSend(event.target.value)} inputMode="decimal" />
                   <AssetSelect
                     asset={sendAsset}
                     tokens={tokens}
@@ -941,14 +1376,14 @@ export function Swap() {
                 Switch
               </button>
               <div className="field">
-                <span className="field-label">You receive</span>
+                <span className="field-label">They lock</span>
                 <div className="field-row">
-                  <input aria-label="You receive" value={receiveText} onChange={(event) => setReceiveText(event.target.value)} inputMode="decimal" />
+                  <input aria-label="They lock" value={receiveText} onChange={(event) => onReceive(event.target.value)} inputMode="decimal" />
                   <AssetSelect asset={receiveAsset} tokens={tokens} bchUsd={bchUsd} onChange={setReceiveAsset} />
                 </div>
               </div>
               <TokenId
-                label="Send token id"
+                label="Your token id"
                 asset={sendAsset}
                 onChange={(category) => {
                   setPortion(null);
@@ -956,7 +1391,7 @@ export function Swap() {
                 }}
               />
               <TokenId
-                label="Receive token id"
+                label="Their token id"
                 asset={receiveAsset}
                 onChange={(category) => setReceiveAsset({ ...receiveAsset, kind: "token", category })}
               />
@@ -966,8 +1401,13 @@ export function Swap() {
                   <span title={oracleTxid}>{rateText}</span>
                 </div>
               ) : null}
-              <button className="go" type="button" onClick={() => void exchange().catch((error: unknown) => setFail(error instanceof Error ? error.message : "rejected"))}>
-                Create transaction
+              <button
+                className="go"
+                type="button"
+                disabled={!wallet || !quoted || seeking}
+                onClick={() => void publish().catch((error: unknown) => setFail(said(error instanceof Error ? error.message : "rejected")))}
+              >
+                {seeking ? "Looking" : "Lock your side"}
               </button>
             </>
           ) : (
@@ -994,24 +1434,36 @@ export function Swap() {
                   />
                 </label>
               ) : null}
-              {phase.name === "payment_seen" ? (
+              {phase.name === "payment_seen" && phase.mirror !== undefined ? (
                 <button
                   className="go"
                   type="button"
-                  onClick={() => void finish(phase.session, phase.deposit, phase.mirror).catch((error: unknown) => setFail(error instanceof Error ? error.message : "rejected"))}
+                  onClick={() => void finish(phase.session, phase.deposit, phase.mirror).catch((error: unknown) => setFail(said(error instanceof Error ? error.message : "rejected")))}
                 >
-                  {phase.mirror === undefined ? "Fund the other side" : "Claim payout"}
+                  Claim payout
                 </button>
               ) : null}
               {phase.name === "refund_available" && phase.txid === undefined ? (
-                <button className="go" type="button" onClick={() => void refund(phase.session, phase.deposit)}>
+                <button className="go" type="button" onClick={() => void refund(phase.session, phase.deposit, phase.which ?? "alice")}>
                   Refund deposit
                 </button>
               ) : null}
             </>
           )}
+          {working !== null ? <p className="status">{working}</p> : null}
           {fail !== null ? <p className="fail">{fail}</p> : null}
         </div>
+        <div className="trades-slot">
+          <OpenTrades
+            offers={offers}
+            icons={Object.fromEntries(tokens.map((token) => [token.category.toLowerCase(), token.icon]))}
+            mineId={phase.name === "offering" ? phase.offerId : null}
+            busy={busy}
+            onTake={(offer) => void take(offer)}
+          />
+        </div>
+        </div>
+        <TradeHistory trades={history} />
       </section>
       <footer className="foot">
         <span>AtomCash</span>
@@ -1026,8 +1478,15 @@ export function Swap() {
                 Close
               </button>
             </div>
-            {qr !== null ? <img className="qr" alt="" src={qr} /> : null}
-            <p className="uri">{uri}</p>
+            <div className="connect-body">
+              {qr !== null ? <img className="qr" alt="" src={qr} /> : null}
+              <p className="uri">{uri}</p>
+              {wallet ? (
+                <button className="go" type="button" onClick={disconnectWallet}>
+                  Disconnect
+                </button>
+              ) : null}
+            </div>
           </div>
         </div>
       ) : null}

@@ -104,13 +104,44 @@ button:disabled { cursor: default; opacity: 0.45; }
 
 .stage {
   flex: 1;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(320px, 440px);
-  gap: 72px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
   width: min(1080px, 100%);
   margin: 0 auto;
-  padding: 64px 32px 48px;
-  align-items: start;
+  padding: 36px 32px 40px;
+}
+
+.brief {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 32px;
+}
+
+.intro { flex: 1 1 auto; min-width: 0; }
+
+.columns {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 28px;
+  min-width: 0;
+}
+
+.trades-slot {
+  flex: 1 1 0;
+  min-width: 280px;
+  min-height: 320px;
+  position: relative;
+}
+
+.lede {
+  max-width: 34ch;
+  margin: 18px 0 0;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.45;
 }
 
 .brief h1 {
@@ -126,11 +157,11 @@ button:disabled { cursor: default; opacity: 0.45; }
 .facts {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 18px 32px;
-  max-width: 360px;
-  margin-top: 40px;
-  border-top: 1px solid var(--line);
-  padding-top: 18px;
+  flex: 0 0 280px;
+  gap: 16px 28px;
+  margin: 0;
+  padding-left: 28px;
+  border-left: 1px solid var(--line);
   font-size: 15px;
 }
 
@@ -146,6 +177,8 @@ button:disabled { cursor: default; opacity: 0.45; }
 }
 
 .ticket {
+  flex: 0 0 440px;
+  width: 440px;
   min-width: 0;
   border: 1px solid var(--line-strong);
   background: var(--panel);
@@ -204,12 +237,16 @@ button:disabled { cursor: default; opacity: 0.45; }
 
 .holdings {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 6px;
   margin: 12px 0;
+  overflow-x: auto;
+  min-width: 0;
 }
 
 .holdings button {
+  flex: none;
+  white-space: nowrap;
   background: transparent;
   border: 1px solid var(--line);
   color: var(--muted);
@@ -318,6 +355,135 @@ button:disabled { cursor: default; opacity: 0.45; }
   color: var(--ink);
   padding: 13px 12px;
   font-size: 13px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.trades {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line-strong);
+  background: var(--panel);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.trades-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.trades-head {
+  display: flex;
+  flex-shrink: 0;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.trades-head h2 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.trades-head span, .trade-meta, .trade-act, .trades-empty {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.trade-switch {
+  display: grid;
+  flex-shrink: 0;
+  grid-template-columns: 1fr 1fr;
+  background: var(--panel);
+}
+
+.trade-switch button, .trade-tokens button {
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  padding: 8px 10px;
+}
+
+.trade-switch button + button { border-left: 1px solid var(--line); }
+
+.trade-switch button.on, .trade-tokens button.on {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.trade-tokens {
+  display: flex;
+  flex-shrink: 0;
+  gap: 0;
+  overflow-x: auto;
+  background: var(--panel);
+}
+
+.trade-tokens button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-right: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.trade-tokens img, .trade-tokens .mark-b, .trade-leg img, .trade-leg .mark-b {
+  width: 16px;
+  height: 16px;
+}
+
+.trades-empty {
+  margin: 0;
+  padding: 16px 14px 18px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.trade-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+
+.queue .trade-row:last-child { border-bottom: 0; }
+
+.trade-pair {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono), monospace;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.trade-leg {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.trade-arrow { color: var(--muted); }
+
+.trade-meta { display: block; margin-top: 4px; }
+
+.trade-act {
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
@@ -449,17 +615,40 @@ button:disabled { cursor: default; opacity: 0.45; }
 }
 
 .dialog {
-  width: min(420px, 100%);
+  width: min(360px, 100%);
   border: 1px solid var(--line-strong);
   background: var(--panel);
-  padding: 16px;
+  padding: 0;
+}
+
+.dialog .slip-head {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
 }
 
 .dialog h2 {
   margin: 0;
   font-family: var(--font-serif), serif;
-  font-size: 28px;
+  font-size: 22px;
   font-weight: 500;
+}
+
+.connect-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 16px;
+}
+
+.dialog .qr { margin: 0; }
+
+.dialog .uri {
+  width: 100%;
+  margin: 0;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
 }
 
 .foot {
@@ -472,13 +661,44 @@ button:disabled { cursor: default; opacity: 0.45; }
   font-size: 12px;
 }
 
+.history {
+  margin-top: 28px;
+  border: 1px solid var(--line-strong);
+  background: var(--panel);
+}
+
+.history-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  border-top: 1px solid var(--line);
+}
+
+.history-ids {
+  display: flex;
+  gap: 12px;
+  color: var(--muted);
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+}
+
+.history-ids a { color: inherit; }
+
 @media (max-width: 860px) {
   .nav { padding: 16px; }
-  .stage {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 32px;
-    padding: 32px 16px 24px;
+  .stage { padding: 32px 16px 24px; }
+  .brief { flex-direction: column; align-items: stretch; }
+  .facts {
+    flex-basis: auto;
+    padding: 16px 0 0;
+    border-left: 0;
+    border-top: 1px solid var(--line);
   }
+  .columns { flex-direction: column; }
+  .ticket { flex: 1 1 auto; width: auto; }
+  .trades-slot { position: static; flex-basis: auto; }
+  .trades { position: static; height: 280px; }
   .nav-actions { gap: 8px; }
   .brief h1 { font-size: 46px; }
   .foot { padding-inline: 16px; }

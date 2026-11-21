@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   binToHex,
+  cashAddressToLockingBytecode,
   CashAddressNetworkPrefix,
   hexToBin,
   lockingBytecodeToCashAddress,
@@ -19,6 +20,7 @@ import {
   refundTx,
   type Side,
 } from "./atom";
+import { categoryHex, sameCategory } from "./token";
 
 export type NetName = "chipnet" | "mainnet";
 
@@ -131,6 +133,51 @@ export async function prepare(network: NetName, input: SideInput) {
   }
 }
 
+export async function listWallet(
+  network: NetName,
+  rows: { pubkeyHex: string; pathName: string; pathIndex: number }[],
+): Promise<Coin[]> {
+  const provider = providerFor(network);
+  try {
+    const groups: Coin[][] = [];
+    for (let start = 0; start < rows.length; start += 6) {
+      const slice = rows.slice(start, start + 6);
+      const part = await Promise.all(
+        slice.map(async (row) => {
+          if (row.pathName !== "receive" && row.pathName !== "change") throw new Error("wallet");
+          if (!Number.isInteger(row.pathIndex) || row.pathIndex < 0 || row.pathIndex > 40) throw new Error("wallet");
+          const lock = lockFromPublicKey(bytesFromHex(row.pubkeyHex), network, true);
+          const utxos = await provider.getUtxos(lock.address);
+          return utxos.map((utxo) => ({
+            txid: utxo.txid,
+            vout: utxo.vout,
+            satoshis: utxo.satoshis.toString(),
+            tokenCategory: utxo.token?.category,
+            tokenAmount: utxo.token?.amount.toString(),
+            address: lock.address,
+            pathName: row.pathName,
+            pathIndex: row.pathIndex,
+          }));
+        }),
+      );
+      groups.push(...part);
+    }
+    const seen = new Set<string>();
+    const coins: Coin[] = [];
+    for (const group of groups) {
+      for (const coin of group) {
+        const key = `${coin.txid}:${coin.vout}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        coins.push(coin);
+      }
+    }
+    return coins;
+  } finally {
+    await provider.disconnect().catch(() => false);
+  }
+}
+
 export async function listUtxos(network: NetName, address: string): Promise<Coin[]> {
   const provider = providerFor(network);
   try {
@@ -186,22 +233,22 @@ export async function buildFunding(args: {
     });
     const contract = instantiate(provider, side);
     const sellingToken = side.tokenCategory.length > 0;
+    const wanted = categoryHex(args.tokenCategory);
     const lockedSats = (sellingToken ? DUST : BigInt(args.payoutSats)) + FEE + OWNER_FEE;
     const selected: Coin[] = [];
     let sats = 0n;
     let token = 0n;
     if (sellingToken) {
-      const holder = args.coins.find(
-        (coin) =>
-          coin.tokenCategory?.toLowerCase() === args.tokenCategory.toLowerCase() &&
-          BigInt(coin.tokenAmount ?? "0") >= side.tokenAmount,
-      );
-      if (holder === undefined) {
-        throw new Error("funds");
+      const holders = args.coins
+        .filter((coin) => sameCategory(wanted, coin.tokenCategory) && BigInt(coin.tokenAmount ?? "0") > 0n)
+        .sort((left, right) => (BigInt(left.tokenAmount ?? "0") < BigInt(right.tokenAmount ?? "0") ? 1 : -1));
+      for (const holder of holders) {
+        if (token >= side.tokenAmount) break;
+        selected.push({ ...holder, tokenCategory: wanted });
+        sats += BigInt(holder.satoshis);
+        token += BigInt(holder.tokenAmount ?? "0");
       }
-      selected.push(holder);
-      sats += BigInt(holder.satoshis);
-      token += BigInt(holder.tokenAmount ?? "0");
+      if (token < side.tokenAmount) throw new Error("token-funds");
     }
     const tokenChange = sellingToken && token > side.tokenAmount ? DUST : 0n;
     const plain = args.coins
@@ -213,9 +260,9 @@ export async function buildFunding(args: {
       sats += BigInt(coin.satoshis);
     }
     if (sats < lockedSats + tokenChange + 500n) {
-      throw new Error("funds");
+      throw new Error("bch-funds");
     }
-    const tokenOut = sellingToken ? { category: args.tokenCategory, amount: side.tokenAmount } : undefined;
+    const tokenOut = sellingToken ? { category: wanted, amount: side.tokenAmount } : undefined;
     const destination = sellingToken ? contract.tokenAddress : contract.address;
     const builder = new TransactionBuilder({ provider });
     for (const coin of selected) {
@@ -226,7 +273,7 @@ export async function buildFunding(args: {
       builder.addOutput({
         to: args.changeAddress,
         amount: DUST,
-        token: { category: args.tokenCategory, amount: token - side.tokenAmount },
+        token: { category: wanted, amount: token - side.tokenAmount },
       });
     }
     builder.addBchChangeOutputIfNeeded({ to: args.changeAddress, feeRate: 2 });
@@ -234,8 +281,8 @@ export async function buildFunding(args: {
     const wire = builder.generateWcTransactionObject({ broadcast: false, userPrompt: "AtomCash" });
     const sourceOutputs: WireSource[] = wire.sourceOutputs.map((row) => ({
       outpointTransactionHash: binToHex(row.outpointTransactionHash),
-      outpointIndex: row.outpointIndex,
-      sequenceNumber: row.sequenceNumber,
+      outpointIndex: Number(row.outpointIndex),
+      sequenceNumber: Number(row.sequenceNumber),
       unlockingBytecode: binToHex(row.unlockingBytecode),
       lockingBytecode: binToHex(row.lockingBytecode),
       valueSatoshis: row.valueSatoshis.toString(),
@@ -331,4 +378,54 @@ export async function broadcast(network: NetName, hex: string): Promise<string> 
 
 export function addressOfLock(lockHex: string, network: NetName, token: boolean): string {
   return cashaddr(bytesFromHex(lockHex), network, token);
+}
+
+function scriptHashOf(address: string): string {
+  const decoded = cashAddressToLockingBytecode(address);
+  if (typeof decoded === "string") throw new Error(decoded);
+  const hash = createHash("sha256").update(decoded.bytecode).digest();
+  return Buffer.from(hash.reverse()).toString("hex");
+}
+
+function preimageInRaw(hex: string, secretHash: string): string | null {
+  const raw = Buffer.from(hex, "hex");
+  for (let index = 0; index < raw.length - 33; index += 1) {
+    if (raw[index] !== 0x20) continue;
+    const push = raw.subarray(index + 1, index + 33);
+    const hash = createHash("sha256").update(push).digest("hex");
+    if (hash === secretHash) return push.toString("hex");
+  }
+  return null;
+}
+
+export async function inspectAddress(
+  network: NetName,
+  address: string,
+  secretHash?: string,
+): Promise<{ utxos: Coin[]; hasHistory: boolean; latestTxid?: string; preimage?: string }> {
+  const utxos = await listUtxos(network, address);
+  const provider = providerFor(network);
+  try {
+    const history = (await provider.performRequest("blockchain.scripthash.get_history", scriptHashOf(address))) as {
+      tx_hash?: string;
+    }[];
+    const ids = (Array.isArray(history) ? history : [])
+      .map((row) => row.tx_hash)
+      .filter((txid): txid is string => typeof txid === "string" && txid !== "");
+    let preimage: string | undefined;
+    if (secretHash !== undefined) {
+      const want = secretHash.toLowerCase();
+      for (const txid of ids.slice(-8).reverse()) {
+        const raw = await provider.getRawTransaction(txid);
+        const found = preimageInRaw(raw, want);
+        if (found !== null) {
+          preimage = found;
+          break;
+        }
+      }
+    }
+    return { utxos, hasHistory: ids.length > 0, latestTxid: ids.at(-1), preimage };
+  } finally {
+    await provider.disconnect().catch(() => false);
+  }
 }

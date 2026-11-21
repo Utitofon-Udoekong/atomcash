@@ -4,7 +4,9 @@ import {
   broadcast,
   buildFunding,
   buildSpend,
+  inspectAddress,
   listUtxos,
+  listWallet,
   lockFromPublicKey,
   prepare,
   type Coin,
@@ -29,6 +31,12 @@ interface UtxoBody {
   op: "utxos";
   network: NetName;
   address: string;
+}
+
+interface CoinsBody {
+  op: "coins";
+  network: NetName;
+  rows: { pubkeyHex: string; pathName: string; pathIndex: number }[];
 }
 
 interface FundBody {
@@ -68,7 +76,14 @@ interface AddressBody {
   token: boolean;
 }
 
-type Body = LockBody | PrepareBody | UtxoBody | FundBody | SpendBody | BroadcastBody | AddressBody;
+interface InspectBody {
+  op: "inspect";
+  network: NetName;
+  address: string;
+  secretHash?: string;
+}
+
+type Body = LockBody | PrepareBody | UtxoBody | CoinsBody | FundBody | SpendBody | BroadcastBody | AddressBody | InspectBody;
 
 function isNet(value: string): value is NetName {
   return value === "mainnet";
@@ -93,6 +108,10 @@ export async function POST(request: Request): Promise<NextResponse> {
         return NextResponse.json(await prepare(body.network, body.side));
       case "utxos":
         return NextResponse.json({ utxos: await listUtxos(body.network, body.address) });
+      case "coins": {
+        if (!Array.isArray(body.rows) || body.rows.length === 0 || body.rows.length > 40) throw new Error("wallet");
+        return NextResponse.json({ utxos: await listWallet(body.network, body.rows) });
+      }
       case "fund":
         return NextResponse.json(await buildFunding(body));
       case "spend":
@@ -101,6 +120,8 @@ export async function POST(request: Request): Promise<NextResponse> {
         return NextResponse.json({ txid: await broadcast(body.network, body.hex) });
       case "address":
         return NextResponse.json({ address: addressOfLock(body.lock, body.network, body.token) });
+      case "inspect":
+        return NextResponse.json(await inspectAddress(body.network, body.address, body.secretHash));
       default: {
         const unreachable: never = body;
         return NextResponse.json({ error: "op", unreachable }, { status: 400 });

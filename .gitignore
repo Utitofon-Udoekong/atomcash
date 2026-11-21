@@ -7,3 +7,4 @@ typechain-types
 .env
 .env.local
 *.tsbuildinfo
+data/

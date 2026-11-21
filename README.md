@@ -5,7 +5,13 @@ github: https://github.com/Utitofon-Udoekong/atomcash
 site: https://atomcash.vercel.app/
 cashtokenaddress: bitcoincash:zq5hh46r4kudjpsayg58gu99h03p00nw4csaumqgy0
 
-Swap BCH for a CashToken, or one CashToken for another, without a custodian. Each side locks its own asset. One preimage pays both sides. A timeout sends each deposit home.
+Both parties must be present. AtomCash will not lock your funds until the other person’s address is known.
+
+A person-to-person exchange that requires both parties to be present.
+
+You and the other person open the page at the same time. The page writes both of your addresses into the two contracts, then asks each wallet to lock. One shared preimage pays both sides. If the other person never locks, you refund after the timeout and take your funds back.
+
+You cannot leave a funded order open for a stranger. The contract pays only to the address written into it at creation. Locking first with an empty address would let anyone who later sees the preimage claim the coins.
 
 ## The problem
 
@@ -13,34 +19,41 @@ Swapping on Bitcoin Cash usually means handing both assets to an exchange. That 
 
 ## How it works
 
+Both parties must be online before either side locks. The page waits until the second address is known, writes both payout addresses into the contracts, and only then requests the funding signatures. This is required by the covenant: a claim pays only the committed address.
+
 One SolidCash contract, two instances, one SHA-256 preimage. Alice's timeout is 180 seconds. Bob's is 120. The page is mainnet. WizardConnect signs only the funding transaction. Claim and refund are already complete, so the wallet cannot rewrite the output.
 
 A claim pays two outputs. Output 0 is the committed lock, category, and amount. Output 1 is 1,000 sats to the CashTokens address above. 800 sats stay for the miner. A refund waits for `tx.time`, then pays the refund lock and the same 1,000 sats.
 
 The preimage that releases one side releases the other. One wrong byte fails the claim, so the preimage is never published, and both sides can still refund.
 
-Chipnet recordings, from before the page was locked to mainnet. No mainnet transaction was broadcast from this workspace. Explorer: https://chipnet.imaginary.cash/tx/
+## Mainnet
+
+One completed swap, 0.00005214 BCH for 0.01 PUSD. Explorer: https://imaginary.cash/tx/
 
 | Step | Txid |
 | --- | --- |
-| BCH fund | `78b45ea722b28b57bebc211bed035f6bcfa93a0da815855e317d7e02bb2ef52b` |
-| BCH claim | `0059e8dca0a8d21d8e6a6c3c496b4c2310e2983aa2d1912ea760ce72b789be17` |
-| BCH refund | `fb24afd2348b978d18e02017b775e297e718b1752f6e3c17e69950a7ad78dfd7` |
-| Alice funds token A | `42510d2f42468a79ddfc81ad4abf3b2db35733b433c4d51be431933b44595f5c` |
-| Bob funds token B | `8cbe13cb59374eae040793f5eefeea6fa8b81a205bb97374bfd7d33dabde3bb2` |
-| Claims of A and B | `d3a6f0738add3dafbfbbcec8c0d236ad4214cde67c7c4a632e7ac1d38b186c74`, `c6d1854a9c32b6a25ba12201101908d9ef2b24075e11a81cb518a186efe00b3f` |
-| XO fund and refund | `b2e7968a5b4898085cad96dd358cb974601b357408bdf126967c0d63fe36b030`, `d48630e8cd953841810d0d14029485811154f7362c7f41736f8e089759a1f16a` |
+| PUSD claim | `1a4ef4d7cfb587f775b66b718f48aba5a234183e41d14f2e895ef95c8d4017ac` paid 0.01 PUSD to `bitcoincash:zq5hh46r4kudjpsayg58gu99h03p00nw4csaumqgy0` |
+| BCH claim | `4c1dd8c13e69ef86f17c81c860bd3bcf82330541637374ece41635ee28c7b75b` paid 0.00005214 BCH to `bitcoincash:zpgn4m5xa08wqrlf3570070vjsdxj9emdv9gmqxgjp` |
 
-Category A is `1ec3a4717811372e0f8a3507f52545636fbd9202997d391e27248fe67608df75`. Category B is `cd536c0ad219d7919d43a0cc8bb4565418ffeb6990bb04a9bf0bbe8d7206b73f`. A wrong category and a wrong amount were rejected and not broadcast. The XO invitation is `xo/invitation.json`. Import `xo/atom-swap.template.json` at https://blaze.xo.cash on chipnet, then join that invitation.
+Each claim also paid 1,000 sats to the CashTokens address above.
+
+## The pool
+
+The pool is how the other person finds your trade.
+
+You post the token and the amounts. That row is the offer. Your coins stay in your wallet. When someone clicks Take, both addresses are written into the contracts, their wallet locks, and yours locks — but only if your page is still open. If you have closed the page, they cannot complete the swap with you.
+
+The pool is a meeting place. It is not a pile of coins that are already locked.
 
 ## Key features
 
 - **Mainnet connect.** WizardConnect. The address under the header is the connected wallet.
-- **What you can send.** Chips show the BCH and CashToken balances. Type an amount, or press 25%, 50%, 75%, or 100%.
+- **What you can lock.** Chips show the BCH and CashToken balances. Type an amount, or press 25%, 50%, 75%, or 100%.
 - **Either asset.** BCH, or a CashToken category. Floating rate uses the Riften oracle. Fixed rate leaves both amounts as typed.
 - **One payout.** Claim pays the committed output. Change one preimage byte and the page shows `secret` without broadcasting.
 - **A refund.** After about three minutes, Refund deposit pays the funding address.
-- **Recorded payments.** The chipnet transactions above. A mainnet payment appears when a wallet broadcasts one from the page.
+- **Recorded payments.** The mainnet claims above. A completed swap also appears under Trade history.
 
 ## Tech stack
 
@@ -53,7 +66,7 @@ Category A is `1ec3a4717811372e0f8a3507f52545636fbd9202997d391e27248fe67608df75`
 | Rates | Riften Delphi oracle, Cauldron token list |
 | XO | `@xo-cash/engine` 0.1.1-next.18170561234, `xo/atom-swap.template.json` |
 | Tests | `pnpm test`: claim, refund, flipped preimage, wrong payout, wrong category, wrong amount, early refund, second input |
-| Package manager | pnpm, Node 18+ |
+
 
 ## Hackathon requirements
 
@@ -64,11 +77,10 @@ Category A is `1ec3a4717811372e0f8a3507f52545636fbd9202997d391e27248fe67608df75`
 | A wrong byte does not pay | Claim fails and the preimage is not broadcast |
 | Either side can still refund | Alice 180 seconds, Bob 120 seconds |
 | Bitcoin Cash or a CashToken | Empty category, or the 32-byte category id |
-| A mainnet transaction from the app | Connect, create a swap, the wallet broadcasts it |
+| A mainnet transaction from the app | PUSD claim `1a4ef4d7cfb587f775b66b718f48aba5a234183e41d14f2e895ef95c8d4017ac`, BCH claim `4c1dd8c13e69ef86f17c81c860bd3bcf82330541637374ece41635ee28c7b75b` |
 | WizardConnect | The Connect button |
-| An XO template and invitation | `xo/atom-swap.template.json`, `xo/invitation.json`, chipnet refund above |
+| An XO template and invitation | `xo/atom-swap.template.json`, `xo/invitation.json` |
 | Working demo | https://atomcash.vercel.app/ |
-| Top-of-page banner | Presentation, GitHub, and the EMBER2026 address |
 
 ## Run
 
@@ -77,7 +89,7 @@ pnpm install
 pnpm dev
 ```
 
-Open http://localhost:3000. Connect a mainnet wallet, enter an amount, and create a swap.
+Open http://localhost:3000. Both people keep the page open. One posts the offer. The other clicks Take.
 
 Contract tests:
 
