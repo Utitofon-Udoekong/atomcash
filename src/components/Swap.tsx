@@ -13,6 +13,7 @@ import { TradeHistory } from "@/components/TradeHistory";
 type NetName = "mainnet";
 type AssetKind = "bch" | "token";
 type Mode = "float" | "fixed";
+type TakeResult = "done" | "failed" | "gone";
 
 interface Asset {
   kind: AssetKind;
@@ -462,7 +463,7 @@ export function Swap() {
   const takerClaimed = useRef(false);
   const resumed = useRef(false);
   const quoteFrom = useRef<"send" | "receive">("send");
-  const takeRef = useRef<(offer: OfferView) => Promise<void>>(async () => undefined);
+  const takeRef = useRef<(offer: OfferView) => Promise<TakeResult>>(async () => "failed");
 
   useEffect(() => {
     let cancel = false;
@@ -867,7 +868,7 @@ export function Swap() {
     }
   }
 
-  async function take(offer: OfferView) {
+  async function take(offer: OfferView): Promise<TakeResult> {
     if (!wallet) {
       pendingOffer.current = offer;
       setShowConnect(true);
